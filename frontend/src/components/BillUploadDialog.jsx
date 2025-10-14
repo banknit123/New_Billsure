@@ -61,17 +61,36 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
     toast.info('Extracting bill information...', { duration: 3000 });
 
     try {
+      // Check file type
+      if (!file.type.startsWith('image/')) {
+        toast.error('Please upload an image file (PNG, JPG)');
+        setProcessing(false);
+        return;
+      }
+
+      console.log('Starting OCR on file:', file.name);
+
       // Use Tesseract.js to extract text from image
-      const result = await Tesseract.recognize(preview, 'eng', {
-        logger: (m) => {
-          if (m.status === 'recognizing text') {
-            console.log(`Progress: ${Math.round(m.progress * 100)}%`);
+      const { data } = await Tesseract.recognize(
+        file,
+        'eng',
+        {
+          logger: (m) => {
+            if (m.status === 'recognizing text') {
+              console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+            }
           }
         }
-      });
+      );
 
-      const extractedText = result.data.text;
+      const extractedText = data.text;
       console.log('Extracted text:', extractedText);
+
+      if (!extractedText || extractedText.trim().length < 10) {
+        toast.error('Could not extract enough text from image. Please try a clearer image or enter manually.');
+        setProcessing(false);
+        return;
+      }
 
       // Parse the extracted text to find bill details
       const parsedData = parseBillText(extractedText);
@@ -85,7 +104,7 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
       toast.success('Bill information extracted! Please review and edit if needed.');
     } catch (error) {
       console.error('OCR Error:', error);
-      toast.error('Failed to extract bill information. Please enter manually.');
+      toast.error('Failed to extract bill information. Please enter manually or try a different image.');
     } finally {
       setProcessing(false);
     }
