@@ -357,24 +357,36 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
             </div>
 
             {file && !extracted && (
-              <Button 
-                onClick={extractBillData} 
-                disabled={processing}
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-                data-testid="extract-btn"
-              >
-                {processing ? (
-                  <>
-                    <Loader2 className="mr-2 animate-spin" size={20} />
-                    Extracting Information...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="mr-2" size={20} />
-                    Extract Bill Information
-                  </>
-                )}
-              </Button>
+              <div className="space-y-4">
+                <Button 
+                  onClick={extractBillData} 
+                  disabled={processing}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700"
+                  data-testid="extract-btn"
+                >
+                  {processing ? (
+                    <>
+                      <Loader2 className="mr-2 animate-spin" size={20} />
+                      Extracting Information... (This may take 10-20 seconds)
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="mr-2" size={20} />
+                      Extract Bill Information with AI
+                    </>
+                  )}
+                </Button>
+                
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-900 font-semibold mb-2">💡 Tips for best results:</p>
+                  <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                    <li>Use a clear, well-lit photo</li>
+                    <li>Make sure text is readable and not blurry</li>
+                    <li>Include the full bill in the image</li>
+                    <li>Extraction takes 10-20 seconds - please wait</li>
+                  </ul>
+                </div>
+              </div>
             )}
 
             {extracted && (
