@@ -94,6 +94,7 @@ class Bill(BaseModel):
     category: str  # Electricity, Water, Council, Mobile, Internet, School Fees, Tuition Fees
     provider: str
     account_number: str
+    bpay_code: Optional[str] = None
     amount: float
     due_date: str  # ISO date string
     frequency: str  # monthly, quarterly, yearly
@@ -104,6 +105,7 @@ class BillCreate(BaseModel):
     category: str
     provider: str
     account_number: str
+    bpay_code: Optional[str] = None
     amount: float
     due_date: str
     frequency: str = "monthly"
