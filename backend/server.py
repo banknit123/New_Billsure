@@ -548,6 +548,158 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         "recent_transactions": transactions[:5]
     }
 
+# Admin routes
+async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Admin authentication middleware"""
+    token = credentials.credentials
+    payload = decode_token(token)
+    user_id = payload.get("user_id")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if user is None or not user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+@api_router.get("/admin/stats")
+async def get_admin_stats(admin_user: dict = Depends(get_admin_user)):
+    """Get overall platform statistics"""
+    total_users = await db.users.count_documents({})
+    total_bills = await db.bills.count_documents({})
+    total_transactions = await db.transactions.count_documents({})
+    pending_bills = await db.bills.count_documents({"status": "pending"})
+    
+    # Calculate total revenue (subscription fees)
+    users = await db.users.find({}, {"_id": 0, "subscription_fee": 1}).to_list(10000)
+    total_monthly_revenue = sum(u.get("subscription_fee", 5.0) for u in users)
+    
+    return {
+        "total_users": total_users,
+        "total_bills": total_bills,
+        "total_transactions": total_transactions,
+        "pending_bills": pending_bills,
+        "monthly_revenue": total_monthly_revenue
+    }
+
+@api_router.get("/admin/users")
+async def get_all_users(admin_user: dict = Depends(get_admin_user)):
+    """Get all users with their bill counts"""
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+    
+    for user in users:
+        bill_count = await db.bills.count_documents({"user_id": user["id"]})
+        user["bill_count"] = bill_count
+    
+    return users
+
+@api_router.get("/admin/bulk-payment-report")
+async def get_bulk_payment_report(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    provider: Optional[str] = None,
+    report_type: str = "daily",  # daily, weekly, monthly
+    admin_user: dict = Depends(get_admin_user)
+):
+    """
+    Get bulk payment report for bills due within date range
+    Groups by provider for bulk payment processing
+    """
+    # Calculate date range based on report type
+    today = datetime.now(timezone.utc)
+    
+    if report_type == "daily":
+        start = today.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = today.replace(hour=23, minute=59, second=59, microsecond=999999)
+    elif report_type == "weekly":
+        start = today - timedelta(days=today.weekday())
+        end = start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+    elif report_type == "monthly":
+        start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        next_month = start.replace(day=28) + timedelta(days=4)
+        end = next_month - timedelta(days=next_month.day)
+    
+    # Use custom dates if provided
+    if start_date:
+        start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+    if end_date:
+        end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+    
+    # Query bills due within date range
+    query = {
+        "status": "pending",
+        "due_date": {
+            "$gte": start.isoformat(),
+            "$lte": end.isoformat()
+        }
+    }
+    
+    if provider:
+        query["provider"] = {"$regex": provider, "$options": "i"}
+    
+    bills = await db.bills.find(query, {"_id": 0}).to_list(10000)
+    
+    # Get user details for each bill
+    bill_reports = []
+    for bill in bills:
+        user = await db.users.find_one({"id": bill["user_id"]}, {"_id": 0, "password": 0})
+        if user:
+            bill_reports.append({
+                "bill_id": bill["id"],
+                "user_name": user["full_name"],
+                "user_email": user["email"],
+                "provider": bill["provider"],
+                "category": bill["category"],
+                "account_number": bill["account_number"],
+                "bpay_code": bill.get("bpay_code"),
+                "amount": bill["amount"],
+                "due_date": bill["due_date"],
+                "frequency": bill["frequency"]
+            })
+    
+    # Group by provider for bulk payment
+    providers_summary = {}
+    for bill in bill_reports:
+        provider_name = bill["provider"]
+        if provider_name not in providers_summary:
+            providers_summary[provider_name] = {
+                "provider": provider_name,
+                "total_amount": 0,
+                "bill_count": 0,
+                "bills": []
+            }
+        providers_summary[provider_name]["total_amount"] += bill["amount"]
+        providers_summary[provider_name]["bill_count"] += 1
+        providers_summary[provider_name]["bills"].append(bill)
+    
+    return {
+        "report_type": report_type,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "total_bills": len(bill_reports),
+        "total_amount": sum(b["amount"] for b in bill_reports),
+        "providers_summary": list(providers_summary.values()),
+        "detailed_bills": bill_reports
+    }
+
+@api_router.post("/admin/process-bulk-payment")
+async def process_bulk_payment(
+    provider: str,
+    bill_ids: List[str],
+    admin_user: dict = Depends(get_admin_user)
+):
+    """
+    Mark bills as paid in bulk (after admin processes payment to provider)
+    """
+    result = await db.bills.update_many(
+        {"id": {"$in": bill_ids}, "provider": provider, "status": "pending"},
+        {"$set": {"status": "paid"}}
+    )
+    
+    return {
+        "message": f"Bulk payment processed for {provider}",
+        "bills_updated": result.modified_count
+    }
+
 # Include router
 app.include_router(api_router)
 
