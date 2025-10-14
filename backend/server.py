@@ -85,6 +85,7 @@ class User(BaseModel):
     wallet_balance: float = 0.0
     subscription_active: bool = True
     subscription_fee: float = 5.0
+    is_admin: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class Bill(BaseModel):
