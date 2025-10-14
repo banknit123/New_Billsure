@@ -227,11 +227,24 @@ const WalletManager = ({ user, refreshUser }) => {
       {paymentStructure && (
         <Card className="shadow-md border-l-4 border-l-emerald-500" data-testid="payment-structure-info">
           <CardHeader>
-            <CardTitle>Your Payment Structure</CardTitle>
-            <CardDescription>Automatic contribution schedule</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Your Payment Structure</CardTitle>
+                <CardDescription>Automatic contribution schedule</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="auto-deduct" className="text-sm">Auto-Deduct</Label>
+                <Switch
+                  id="auto-deduct"
+                  checked={paymentStructure.auto_deduct_enabled}
+                  onCheckedChange={handleToggleAutoDeduct}
+                  data-testid="auto-deduct-toggle"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid md:grid-cols-4 gap-6 mb-4">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Payment Frequency</p>
                 <p className="text-2xl font-bold text-gray-900 capitalize">{paymentStructure.payment_frequency}</p>
@@ -241,19 +254,36 @@ const WalletManager = ({ user, refreshUser }) => {
                 <p className="text-2xl font-bold text-emerald-600">${paymentStructure.contribution_amount.toFixed(2)}</p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 mb-1">Total Monthly Bills</p>
+                <p className="text-sm text-gray-600 mb-1">Monthly Bills</p>
                 <p className="text-2xl font-bold text-gray-900">${paymentStructure.total_monthly_bills.toFixed(2)}</p>
               </div>
+              <div>
+                <p className="text-sm text-gray-600 mb-1">Yearly Prediction</p>
+                <p className="text-2xl font-bold text-blue-600">${paymentStructure.total_yearly_bills.toFixed(2)}</p>
+              </div>
             </div>
-            <div className="mt-4 p-4 bg-emerald-50 rounded-lg">
-              <p className="text-sm text-emerald-900">
-                <Calendar className="inline mr-2" size={16} />
-                Next scheduled contribution: {new Date(paymentStructure.next_payment_date).toLocaleDateString()}
-              </p>
+            <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg">
+              <div className="flex items-start gap-3">
+                <Calendar className="text-emerald-600 mt-0.5" size={20} />
+                <div>
+                  <p className="text-sm font-semibold text-emerald-900">
+                    Next scheduled deduction: {new Date(paymentStructure.next_deduction_date).toLocaleDateString()}
+                  </p>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    {paymentStructure.auto_deduct_enabled 
+                      ? `$${paymentStructure.contribution_amount.toFixed(2)} will be automatically deducted from your linked bank account`
+                      : 'Auto-deduction is disabled. Enable it to automate your payments.'
+                    }
+                  </p>
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Bank Details Section */}
+      <BankDetailsManager user={user} refreshUser={refreshUser} />
 
       {/* Transactions History */}
       <Card className="shadow-md">
