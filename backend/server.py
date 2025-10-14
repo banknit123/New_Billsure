@@ -108,18 +108,53 @@ class BillCreate(BaseModel):
     due_date: str
     frequency: str = "monthly"
 
+class BankDetails(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    account_holder_name: str
+    bank_name: str
+    account_number: str  # Encrypted in production
+    routing_number: str
+    account_type: str  # checking, savings
+    is_primary: bool = True
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class BankDetailsCreate(BaseModel):
+    account_holder_name: str
+    bank_name: str
+    account_number: str
+    routing_number: str
+    account_type: str = "checking"
+
 class PaymentStructure(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
     payment_frequency: str  # weekly, fortnightly, monthly
+    total_yearly_bills: float
     total_monthly_bills: float
     contribution_amount: float
-    next_payment_date: str
+    next_deduction_date: str
+    auto_deduct_enabled: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class PaymentStructureCreate(BaseModel):
     payment_frequency: str
+    auto_deduct_enabled: bool = True
+
+class BillUpload(BaseModel):
+    file_data: str  # Base64 encoded file
+    file_name: str
+    file_type: str  # image/jpeg, image/png, application/pdf
+
+class ParsedBillData(BaseModel):
+    category: Optional[str] = None
+    provider: Optional[str] = None
+    account_number: Optional[str] = None
+    amount: Optional[float] = None
+    due_date: Optional[str] = None
+    extracted_text: str
 
 class Transaction(BaseModel):
     model_config = ConfigDict(extra="ignore")
