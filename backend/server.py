@@ -260,29 +260,42 @@ async def delete_bill(bill_id: str, current_user: dict = Depends(get_current_use
 # Payment structure routes
 @api_router.post("/payment-structure", response_model=PaymentStructure)
 async def create_payment_structure(data: PaymentStructureCreate, current_user: dict = Depends(get_current_user)):
-    # Calculate total monthly bills
+    # Get all bills for the user
     bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    total_monthly = sum(bill["amount"] for bill in bills if bill["frequency"] == "monthly")
     
-    # Calculate contribution amount based on frequency
+    # Calculate total yearly bills based on frequency
+    total_yearly = 0
+    for bill in bills:
+        if bill["frequency"] == "monthly":
+            total_yearly += bill["amount"] * 12
+        elif bill["frequency"] == "quarterly":
+            total_yearly += bill["amount"] * 4
+        elif bill["frequency"] == "yearly":
+            total_yearly += bill["amount"]
+    
+    total_monthly = total_yearly / 12
+    
+    # Calculate contribution amount based on payment frequency
     if data.payment_frequency == "weekly":
-        contribution = total_monthly / 4
+        contribution = total_yearly / 52  # 52 weeks in a year
         days_until_next = 7
     elif data.payment_frequency == "fortnightly":
-        contribution = total_monthly / 2
+        contribution = total_yearly / 26  # 26 fortnights in a year
         days_until_next = 14
     else:  # monthly
-        contribution = total_monthly
+        contribution = total_yearly / 12  # 12 months
         days_until_next = 30
     
-    next_payment = (datetime.now(timezone.utc) + timedelta(days=days_until_next)).isoformat()
+    next_deduction = (datetime.now(timezone.utc) + timedelta(days=days_until_next)).isoformat()
     
     payment_structure = PaymentStructure(
         user_id=current_user["id"],
         payment_frequency=data.payment_frequency,
+        total_yearly_bills=total_yearly,
         total_monthly_bills=total_monthly,
         contribution_amount=contribution,
-        next_payment_date=next_payment
+        next_deduction_date=next_deduction,
+        auto_deduct_enabled=data.auto_deduct_enabled
     )
     
     # Delete existing structure
@@ -299,6 +312,131 @@ async def get_payment_structure(current_user: dict = Depends(get_current_user)):
     if not structure:
         raise HTTPException(status_code=404, detail="Payment structure not set up")
     return structure
+
+@api_router.put("/payment-structure/toggle-auto-deduct")
+async def toggle_auto_deduct(current_user: dict = Depends(get_current_user)):
+    structure = await db.payment_structures.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not structure:
+        raise HTTPException(status_code=404, detail="Payment structure not set up")
+    
+    new_status = not structure.get("auto_deduct_enabled", True)
+    await db.payment_structures.update_one(
+        {"user_id": current_user["id"]},
+        {"$set": {"auto_deduct_enabled": new_status}}
+    )
+    
+    return {"auto_deduct_enabled": new_status, "message": f"Auto-deduction {'enabled' if new_status else 'disabled'}"}
+
+# Bank Details routes
+@api_router.post("/bank-details", response_model=BankDetails)
+async def add_bank_details(bank_data: BankDetailsCreate, current_user: dict = Depends(get_current_user)):
+    # In production, encrypt account_number and routing_number
+    bank_details = BankDetails(
+        user_id=current_user["id"],
+        **bank_data.model_dump()
+    )
+    
+    # Set other bank accounts as non-primary if this is primary
+    if bank_details.is_primary:
+        await db.bank_details.update_many(
+            {"user_id": current_user["id"]},
+            {"$set": {"is_primary": False}}
+        )
+    
+    await db.bank_details.insert_one(bank_details.model_dump())
+    return bank_details
+
+@api_router.get("/bank-details", response_model=List[BankDetails])
+async def get_bank_details(current_user: dict = Depends(get_current_user)):
+    bank_accounts = await db.bank_details.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    # Mask account numbers for security (show only last 4 digits)
+    for account in bank_accounts:
+        account["account_number"] = "****" + account["account_number"][-4:]
+        account["routing_number"] = "****" + account["routing_number"][-4:]
+    return bank_accounts
+
+@api_router.delete("/bank-details/{bank_id}")
+async def delete_bank_details(bank_id: str, current_user: dict = Depends(get_current_user)):
+    result = await db.bank_details.delete_one({"id": bank_id, "user_id": current_user["id"]})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    return {"message": "Bank account deleted successfully"}
+
+# Bill Upload and Parsing route
+@api_router.post("/bills/upload-and-parse")
+async def upload_and_parse_bill(current_user: dict = Depends(get_current_user)):
+    # This endpoint will receive the parsed data from frontend (Tesseract runs client-side)
+    # Frontend will send extracted text and we'll parse it here
+    return {"message": "Bill parsing handled on client-side with Tesseract.js"}
+
+@api_router.post("/bills/save-parsed")
+async def save_parsed_bill(bill_data: BillCreate, current_user: dict = Depends(get_current_user)):
+    # Save bill from parsed data
+    bill = Bill(
+        user_id=current_user["id"],
+        **bill_data.model_dump()
+    )
+    bill_dict = bill.model_dump()
+    await db.bills.insert_one(bill_dict)
+    return bill
+
+# Automatic bill payment scheduler (simulated)
+@api_router.post("/bills/process-auto-payments")
+async def process_auto_payments(current_user: dict = Depends(get_current_user)):
+    """
+    Process automatic bill payments for bills due within next 3 days
+    In production, this would be a scheduled job (cron/celery)
+    """
+    # Get pending bills due within next 3 days
+    today = datetime.now(timezone.utc)
+    three_days_later = today + timedelta(days=3)
+    
+    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    
+    paid_bills = []
+    failed_bills = []
+    
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    
+    for bill in bills:
+        bill_due_date = datetime.fromisoformat(bill["due_date"].replace('Z', '+00:00'))
+        
+        if bill_due_date <= three_days_later:
+            # Check wallet balance
+            if user["wallet_balance"] >= bill["amount"]:
+                # Create transaction
+                transaction = Transaction(
+                    user_id=current_user["id"],
+                    type="bill_payment",
+                    amount=bill["amount"],
+                    description=f"Auto-payment for {bill['category']} - {bill['provider']}"
+                )
+                await db.transactions.insert_one(transaction.model_dump())
+                
+                # Update wallet balance
+                await db.users.update_one(
+                    {"id": current_user["id"]},
+                    {"$inc": {"wallet_balance": -bill["amount"]}}
+                )
+                
+                # Update bill status
+                await db.bills.update_one(
+                    {"id": bill["id"]},
+                    {"$set": {"status": "paid"}}
+                )
+                
+                paid_bills.append(bill)
+                user["wallet_balance"] -= bill["amount"]
+            else:
+                failed_bills.append(bill)
+    
+    return {
+        "paid_count": len(paid_bills),
+        "failed_count": len(failed_bills),
+        "paid_bills": paid_bills,
+        "failed_bills": failed_bills,
+        "message": f"Processed {len(paid_bills)} bills successfully, {len(failed_bills)} failed due to insufficient balance"
+    }
 
 # Transaction routes
 @api_router.post("/transactions/deposit")
