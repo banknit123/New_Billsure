@@ -532,9 +532,14 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     
     for bill in bills:
         if bill["status"] == "pending":
-            bill_due_date = datetime.fromisoformat(bill["due_date"].replace('Z', '+00:00'))
-            if bill_due_date <= seven_days_later:
-                bills_due_soon.append(bill)
+            try:
+                bill_due_date = datetime.fromisoformat(bill["due_date"].replace('Z', '+00:00'))
+                if bill_due_date.tzinfo is None:
+                    bill_due_date = bill_due_date.replace(tzinfo=timezone.utc)
+                if bill_due_date <= seven_days_later:
+                    bills_due_soon.append(bill)
+            except Exception as e:
+                print(f"Error parsing date for bill {bill.get('id')}: {e}")
     
     return {
         "wallet_balance": current_user["wallet_balance"],
