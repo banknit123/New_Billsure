@@ -65,7 +65,8 @@ const WalletManager = ({ user, refreshUser }) => {
     e.preventDefault();
     try {
       const response = await axiosInstance.post(`${API}/payment-structure`, {
-        payment_frequency: paymentFrequency
+        payment_frequency: paymentFrequency,
+        auto_deduct_enabled: true
       });
       setPaymentStructure(response.data);
       toast.success('Payment structure set up successfully!');
@@ -73,6 +74,16 @@ const WalletManager = ({ user, refreshUser }) => {
       fetchData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to set up payment structure');
+    }
+  };
+
+  const handleToggleAutoDeduct = async () => {
+    try {
+      const response = await axiosInstance.put(`${API}/payment-structure/toggle-auto-deduct`);
+      toast.success(response.data.message);
+      fetchData();
+    } catch (error) {
+      toast.error('Failed to toggle auto-deduction');
     }
   };
 
