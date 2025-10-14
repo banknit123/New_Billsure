@@ -512,12 +512,36 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     paid_bills = len([b for b in bills if b["status"] == "paid"])
     total_bill_amount = sum(b["amount"] for b in bills if b["status"] == "pending")
     
+    # Calculate yearly prediction
+    total_yearly_prediction = 0
+    for bill in bills:
+        if bill["frequency"] == "monthly":
+            total_yearly_prediction += bill["amount"] * 12
+        elif bill["frequency"] == "quarterly":
+            total_yearly_prediction += bill["amount"] * 4
+        elif bill["frequency"] == "yearly":
+            total_yearly_prediction += bill["amount"]
+    
+    # Get bills due soon (next 7 days)
+    today = datetime.now(timezone.utc)
+    seven_days_later = today + timedelta(days=7)
+    bills_due_soon = []
+    
+    for bill in bills:
+        if bill["status"] == "pending":
+            bill_due_date = datetime.fromisoformat(bill["due_date"].replace('Z', '+00:00'))
+            if bill_due_date <= seven_days_later:
+                bills_due_soon.append(bill)
+    
     return {
         "wallet_balance": current_user["wallet_balance"],
         "total_bills": total_bills,
         "pending_bills": pending_bills,
         "paid_bills": paid_bills,
         "total_bill_amount": total_bill_amount,
+        "total_yearly_prediction": total_yearly_prediction,
+        "bills_due_soon": len(bills_due_soon),
+        "bills_due_soon_list": bills_due_soon,
         "recent_transactions": transactions[:5]
     }
 
