@@ -149,13 +149,23 @@ const BillsManager = ({ user, refreshUser }) => {
           <h2 className="text-2xl font-bold text-gray-900">Manage Your Bills</h2>
           <p className="text-gray-600 mt-1">Add, edit, and track all your utility bills in one place</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
-          <DialogTrigger asChild>
-            <Button className="bg-emerald-600 hover:bg-emerald-700" data-testid="add-bill-btn">
-              <Plus className="mr-2" size={20} />
-              Add Bill
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button 
+            onClick={() => setUploadDialogOpen(true)} 
+            variant="outline"
+            className="border-2"
+            data-testid="upload-bill-btn"
+          >
+            <Upload className="mr-2" size={20} />
+            Upload Bill
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={handleDialogClose}>
+            <DialogTrigger asChild>
+              <Button className="bg-emerald-600 hover:bg-emerald-700" data-testid="add-bill-btn">
+                <Plus className="mr-2" size={20} />
+                Add Bill
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-md" data-testid="bill-dialog">
             <DialogHeader>
               <DialogTitle>{editingBill ? 'Edit Bill' : 'Add New Bill'}</DialogTitle>
