@@ -93,68 +93,154 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
 
   const parseBillText = (text) => {
     const parsed = {};
+    const textLower = text.toLowerCase();
 
-    // Extract amount (look for currency patterns like $123.45 or 123.45)
-    const amountMatch = text.match(/\$?\s*(\d+[\d,]*\.?\d{0,2})/);
-    if (amountMatch) {
-      const amount = parseFloat(amountMatch[1].replace(/,/g, ''));
-      if (amount > 0 && amount < 10000) { // Reasonable bill amount
-        parsed.amount = amount.toString();
-      }
-    }
-
-    // Extract due date (look for date patterns)
-    const dateMatch = text.match(/(?:due|payment|pay by)[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})/i);
-    if (dateMatch) {
-      try {
-        const dateParts = dateMatch[1].split(/[-/]/);
-        if (dateParts.length === 3) {
-          let [month, day, year] = dateParts;
-          if (year.length === 2) {
-            year = '20' + year;
-          }
-          parsed.due_date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    // Enhanced amount extraction with multiple patterns
+    let amountFound = false;
+    
+    // Pattern 1: Look for "amount due", "total", "balance due"
+    const amountPatterns = [
+      /(?:amount due|total due|balance due|amount|total|balance)[:\s]*\$?\s*(\d+[,\d]*\.?\d{0,2})/i,
+      /\$\s*(\d+[,\d]*\.\d{2})/g,
+      /(?:pay|payment)[:\s]*\$?\s*(\d+[,\d]*\.?\d{0,2})/i
+    ];
+    
+    for (const pattern of amountPatterns) {
+      const matches = text.matchAll(pattern);
+      const amounts = [];
+      for (const match of matches) {
+        const amount = parseFloat(match[1].replace(/,/g, ''));
+        if (amount > 10 && amount < 10000) {
+          amounts.push(amount);
         }
-      } catch (e) {
-        console.error('Date parsing error:', e);
+      }
+      if (amounts.length > 0) {
+        // Take the largest amount as it's likely the total
+        parsed.amount = Math.max(...amounts).toString();
+        amountFound = true;
+        break;
       }
     }
 
-    // Extract account number (look for account/acct number)
-    const accountMatch = text.match(/(?:account|acct|a\/c)[#\s:]*([0-9]{6,15})/i);
-    if (accountMatch) {
-      parsed.account_number = accountMatch[1];
+    // Enhanced date extraction with multiple formats
+    const datePatterns = [
+      /(?:due date|payment due|pay by|due)[:\s]*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/i,
+      /(?:due date|payment due|pay by|due)[:\s]*(\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{2,4})/i,
+      /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/
+    ];
+    
+    for (const pattern of datePatterns) {
+      const dateMatch = text.match(pattern);
+      if (dateMatch) {
+        try {
+          let dateStr = dateMatch[1];
+          
+          // Handle month names
+          if (dateStr.match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i)) {
+            const monthMap = {
+              jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+              jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+            };
+            const parts = dateStr.split(/\s+/);
+            const day = parts[0].padStart(2, '0');
+            const month = monthMap[parts[1].toLowerCase().substr(0, 3)];
+            const year = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+            parsed.due_date = `${year}-${month}-${day}`;
+          } else {
+            // Handle numeric dates
+            const dateParts = dateStr.split(/[-/]/);
+            if (dateParts.length === 3) {
+              let day, month, year;
+              
+              // Try to determine format (MM/DD/YYYY or DD/MM/YYYY)
+              if (parseInt(dateParts[0]) > 12) {
+                // Must be DD/MM/YYYY
+                [day, month, year] = dateParts;
+              } else if (parseInt(dateParts[1]) > 12) {
+                // Must be MM/DD/YYYY
+                [month, day, year] = dateParts;
+              } else {
+                // Ambiguous - default to MM/DD/YYYY (US format)
+                [month, day, year] = dateParts;
+              }
+              
+              if (year.length === 2) {
+                year = '20' + year;
+              }
+              parsed.due_date = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            }
+          }
+          break;
+        } catch (e) {
+          console.error('Date parsing error:', e);
+        }
+      }
     }
 
-    // Try to detect provider/company name (usually at the top)
+    // Enhanced account number extraction
+    const accountPatterns = [
+      /(?:account\s*(?:number|no|#)|acct\s*(?:number|no|#)|customer\s*(?:number|no|#))[:\s]*([0-9]{6,20})/i,
+      /(?:ref|reference)[:\s]*([0-9]{6,20})/i,
+      /(?:a\/c|acc)[:\s]*([0-9]{6,20})/i
+    ];
+    
+    for (const pattern of accountPatterns) {
+      const accountMatch = text.match(pattern);
+      if (accountMatch) {
+        parsed.account_number = accountMatch[1];
+        break;
+      }
+    }
+
+    // Enhanced provider detection
     const lines = text.split('\n').filter(line => line.trim().length > 0);
-    if (lines.length > 0) {
-      // Look for company names in first few lines
-      for (let i = 0; i < Math.min(3, lines.length); i++) {
-        const line = lines[i].trim();
-        if (line.length > 3 && line.length < 50 && !line.match(/^\d/)) {
+    const providerKeywords = ['energy', 'power', 'electric', 'water', 'gas', 'telecom', 'internet', 'council', 'utility'];
+    
+    for (let i = 0; i < Math.min(5, lines.length); i++) {
+      const line = lines[i].trim();
+      // Look for company names (should have some letters, not all numbers)
+      if (line.length > 3 && line.length < 60 && line.match(/[a-zA-Z]/) && !line.match(/^\d+$/)) {
+        // Check if line contains provider keywords or is likely a company name
+        const lineWords = line.toLowerCase().split(/\s+/);
+        if (lineWords.some(word => providerKeywords.includes(word)) || 
+            (line.match(/^[A-Z]/) && line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 5)) {
           parsed.provider = line;
           break;
         }
       }
     }
 
-    // Try to detect category based on keywords
-    const textLower = text.toLowerCase();
-    if (textLower.includes('electric') || textLower.includes('power')) {
-      parsed.category = 'Electricity';
-    } else if (textLower.includes('water')) {
-      parsed.category = 'Water';
-    } else if (textLower.includes('gas')) {
-      parsed.category = 'Gas';
-    } else if (textLower.includes('internet') || textLower.includes('broadband')) {
-      parsed.category = 'Internet';
-    } else if (textLower.includes('mobile') || textLower.includes('phone')) {
-      parsed.category = 'Mobile';
-    } else if (textLower.includes('council')) {
-      parsed.category = 'Council';
+    // Enhanced category detection with more keywords
+    const categoryDetection = {
+      'Electricity': ['electric', 'power', 'energy supply', 'electricity'],
+      'Water': ['water', 'aqua', 'h2o', 'water supply'],
+      'Gas': ['gas', 'natural gas', 'lpg'],
+      'Internet': ['internet', 'broadband', 'wifi', 'nbn', 'fibre', 'fiber'],
+      'Mobile': ['mobile', 'phone', 'cellular', 'telstra', 'vodafone', 'optus'],
+      'Council': ['council', 'rates', 'municipal'],
+      'Insurance': ['insurance', 'policy', 'premium'],
+      'School Fees': ['school', 'tuition', 'education', 'university', 'college'],
+    };
+    
+    for (const [category, keywords] of Object.entries(categoryDetection)) {
+      if (keywords.some(keyword => textLower.includes(keyword))) {
+        parsed.category = category;
+        break;
+      }
     }
 
+    // Extract BPAY reference if available
+    const bpayMatch = text.match(/(?:bpay|biller code)[:\s]*([0-9]{4,6})/i);
+    if (bpayMatch) {
+      parsed.bpay_code = bpayMatch[1];
+    }
+
+    const bpayRefMatch = text.match(/(?:ref|reference)[:\s]*([0-9]{6,20})/i);
+    if (bpayRefMatch && !parsed.account_number) {
+      parsed.account_number = bpayRefMatch[1];
+    }
+
+    console.log('Parsed bill data:', parsed);
     return parsed;
   };
 
