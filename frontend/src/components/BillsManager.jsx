@@ -351,6 +351,16 @@ const BillsManager = ({ user, refreshUser }) => {
           </CardContent>
         </Card>
       )}
+
+      {/* Bill Upload Dialog */}
+      <BillUploadDialog 
+        open={uploadDialogOpen} 
+        onOpenChange={setUploadDialogOpen}
+        onBillAdded={() => {
+          fetchBills();
+          refreshUser();
+        }}
+      />
     </div>
   );
 };
