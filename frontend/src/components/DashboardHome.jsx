@@ -59,12 +59,12 @@ const DashboardHome = ({ user, refreshUser }) => {
       testId: 'stat-pending-bills'
     },
     {
-      title: 'Paid Bills',
-      value: stats?.paid_bills || 0,
-      icon: CheckCircle,
-      color: 'text-green-600',
-      bgColor: 'bg-green-50',
-      testId: 'stat-paid-bills'
+      title: 'Yearly Prediction',
+      value: `$${stats?.total_yearly_prediction?.toFixed(2) || '0.00'}`,
+      icon: TrendingUp,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50',
+      testId: 'stat-yearly-prediction'
     }
   ];
 
