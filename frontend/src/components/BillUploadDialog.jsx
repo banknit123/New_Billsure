@@ -39,6 +39,19 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
+      // Check file type
+      const validTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+      if (!validTypes.includes(selectedFile.type)) {
+        toast.error('Please upload a JPG or PNG image');
+        return;
+      }
+
+      // Check file size (max 10MB)
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        toast.error('File size must be less than 10MB');
+        return;
+      }
+
       setFile(selectedFile);
       setExtracted(false);
       
@@ -46,6 +59,9 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreview(reader.result);
+      };
+      reader.onerror = () => {
+        toast.error('Failed to read file');
       };
       reader.readAsDataURL(selectedFile);
     }
