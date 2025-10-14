@@ -257,6 +257,7 @@ const BillsManager = ({ user, refreshUser }) => {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Bills List */}
