@@ -32,7 +32,13 @@ const Login = () => {
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('user', JSON.stringify(response.data.user));
       toast.success('Login successful!');
-      navigate('/dashboard');
+      
+      // Redirect to admin panel if user is admin
+      if (response.data.user.is_admin) {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Login failed. Please try again.');
     } finally {
