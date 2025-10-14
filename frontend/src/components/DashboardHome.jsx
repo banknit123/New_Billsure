@@ -181,11 +181,47 @@ const DashboardHome = ({ user, refreshUser }) => {
       </Card>
 
       {/* Upcoming Bills Alert */}
-      {stats?.pending_bills > 0 && stats?.total_bill_amount > 0 && (
-        <Card className="shadow-md border-l-4 border-l-orange-500 bg-orange-50" data-testid="upcoming-bills-alert">
+      {stats?.bills_due_soon > 0 && (
+        <Card className="shadow-md border-l-4 border-l-orange-500 bg-orange-50" data-testid="bills-due-soon-alert">
           <CardContent className="p-6">
             <div className="flex items-start gap-4">
               <AlertCircle className="text-orange-600 flex-shrink-0" size={24} />
+              <div className="flex-1">
+                <h3 className="font-bold text-gray-900 mb-1">Bills Due Soon!</h3>
+                <p className="text-gray-700 mb-3">
+                  You have {stats.bills_due_soon} bill{stats.bills_due_soon > 1 ? 's' : ''} due within the next 7 days
+                </p>
+                {stats.bills_due_soon_list && stats.bills_due_soon_list.length > 0 && (
+                  <div className="space-y-2">
+                    {stats.bills_due_soon_list.slice(0, 3).map((bill, index) => (
+                      <div key={index} className="flex items-center justify-between bg-white p-3 rounded-lg">
+                        <div>
+                          <p className="font-semibold text-gray-900">{bill.category} - {bill.provider}</p>
+                          <p className="text-sm text-gray-600">Due: {new Date(bill.due_date).toLocaleDateString()}</p>
+                        </div>
+                        <p className="font-bold text-orange-600">${bill.amount.toFixed(2)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Button 
+                  onClick={() => navigate('/dashboard/bills')} 
+                  className="mt-4 bg-orange-600 hover:bg-orange-700"
+                >
+                  View All Bills
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Insufficient Balance Warning */}
+      {stats?.pending_bills > 0 && stats?.total_bill_amount > 0 && (
+        <Card className="shadow-md border-l-4 border-l-red-500 bg-red-50" data-testid="upcoming-bills-alert">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="text-red-600 flex-shrink-0" size={24} />
               <div>
                 <h3 className="font-bold text-gray-900 mb-1">Upcoming Bills</h3>
                 <p className="text-gray-700">
