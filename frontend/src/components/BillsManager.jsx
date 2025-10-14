@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Plus, Edit, Trash2, Receipt, AlertCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Receipt, AlertCircle, Upload } from 'lucide-react';
+import BillUploadDialog from './BillUploadDialog';
 
 const BILL_CATEGORIES = [
   'Electricity',
