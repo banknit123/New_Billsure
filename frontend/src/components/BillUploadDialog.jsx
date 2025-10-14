@@ -333,7 +333,7 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
               <input
                 id="bill-file"
                 type="file"
-                accept="image/*,.pdf"
+                accept="image/jpeg,image/jpg,image/png"
                 onChange={handleFileChange}
                 className="hidden"
                 data-testid="file-input"
@@ -343,12 +343,14 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
                   <div className="space-y-4">
                     <img src={preview} alt="Bill preview" className="max-h-48 mx-auto rounded" />
                     <p className="text-sm text-gray-600">{file?.name}</p>
+                    <p className="text-xs text-gray-500">Click to change image</p>
                   </div>
                 ) : (
                   <>
                     <Upload className="mx-auto mb-4 text-gray-400" size={48} />
                     <p className="text-gray-600 mb-2">Click to upload or drag and drop</p>
-                    <p className="text-sm text-gray-500">PNG, JPG, or PDF (max 10MB)</p>
+                    <p className="text-sm text-gray-500">JPG or PNG only (max 10MB)</p>
+                    <p className="text-xs text-emerald-600 mt-2">📸 For best results, take a clear photo of your bill</p>
                   </>
                 )}
               </label>
