@@ -27,6 +27,7 @@ const BillsManager = ({ user, refreshUser }) => {
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [editingBill, setEditingBill] = useState(null);
   const [formData, setFormData] = useState({
     category: '',
