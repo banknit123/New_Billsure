@@ -396,6 +396,25 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
                   <span className="font-semibold">Information Extracted!</span>
                 </div>
                 <p className="text-sm text-green-600 mt-1">Review the details below and make any necessary corrections.</p>
+                <div className="mt-3 space-y-1 text-xs text-green-700">
+                  {formData.category && <p>✓ Category: {formData.category}</p>}
+                  {formData.provider && <p>✓ Provider: {formData.provider}</p>}
+                  {formData.amount && <p>✓ Amount: ${formData.amount}</p>}
+                  {formData.account_number && <p>✓ Account: {formData.account_number}</p>}
+                  {formData.due_date && <p>✓ Due Date: {formData.due_date}</p>}
+                </div>
+              </div>
+            )}
+
+            {processing && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-yellow-700">
+                  <Loader2 className="animate-spin" size={20} />
+                  <span className="font-semibold">Processing Image...</span>
+                </div>
+                <p className="text-sm text-yellow-600 mt-1">
+                  Our AI is reading your bill. This usually takes 10-20 seconds. Please wait...
+                </p>
               </div>
             )}
           </div>
