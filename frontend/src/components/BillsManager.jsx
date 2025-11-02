@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Receipt, AlertCircle, Upload } from 'lucide-react';
 import BillUploadDialog from './BillUploadDialog';
+import ElectricityConnection from './ElectricityConnection';
 
 const BILL_CATEGORIES = [
   'Electricity',
