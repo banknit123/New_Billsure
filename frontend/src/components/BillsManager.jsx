@@ -167,6 +167,102 @@ const BillsManager = ({ user, refreshUser }) => {
                 Add Bill
               </Button>
             </DialogTrigger>
+            <DialogContent className="max-w-md" data-testid="bill-dialog">
+              <DialogHeader>
+                <DialogTitle>{editingBill ? 'Edit Bill' : 'Add New Bill'}</DialogTitle>
+                <DialogDescription>
+                  {editingBill ? 'Update your bill information' : 'Enter your bill details below'}
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category</Label>
+                  <Select value={formData.category} onValueChange={(value) => handleChange('category', value)} required>
+                    <SelectTrigger data-testid="bill-category-select">
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BILL_CATEGORIES.map((cat) => (
+                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="provider">Provider</Label>
+                  <Input
+                    id="provider"
+                    value={formData.provider}
+                    onChange={(e) => handleChange('provider', e.target.value)}
+                    placeholder="e.g., ABC Energy"
+                    required
+                    data-testid="bill-provider-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="account_number">Account Number</Label>
+                  <Input
+                    id="account_number"
+                    value={formData.account_number}
+                    onChange={(e) => handleChange('account_number', e.target.value)}
+                    placeholder="e.g., 123456789"
+                    required
+                    data-testid="bill-account-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount ($)</Label>
+                  <Input
+                    id="amount"
+                    type="number"
+                    step="0.01"
+                    value={formData.amount}
+                    onChange={(e) => handleChange('amount', e.target.value)}
+                    placeholder="0.00"
+                    required
+                    data-testid="bill-amount-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="due_date">Due Date</Label>
+                  <Input
+                    id="due_date"
+                    type="date"
+                    value={formData.due_date}
+                    onChange={(e) => handleChange('due_date', e.target.value)}
+                    required
+                    data-testid="bill-due-date-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="frequency">Frequency</Label>
+                  <Select value={formData.frequency} onValueChange={(value) => handleChange('frequency', value)} required>
+                    <SelectTrigger data-testid="bill-frequency-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="quarterly">Quarterly</SelectItem>
+                      <SelectItem value="yearly">Yearly</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <Button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700" data-testid="bill-submit-btn">
+                    {editingBill ? 'Update Bill' : 'Add Bill'}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => handleDialogClose(false)} data-testid="bill-cancel-btn">
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Electricity Provider Connection */}
+      <ElectricityConnection user={user} refreshUser={refreshUser} />
           <DialogContent className="max-w-md" data-testid="bill-dialog">
             <DialogHeader>
               <DialogTitle>{editingBill ? 'Edit Bill' : 'Add New Bill'}</DialogTitle>
