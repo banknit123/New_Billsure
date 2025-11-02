@@ -160,6 +160,63 @@ class ParsedBillData(BaseModel):
     due_date: Optional[str] = None
     extracted_text: str
 
+class DirectDebitRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    mandate_reference: str  # Unique DDR reference
+    bank_name: str
+    bsb: str  # Australian Bank State Branch code
+    account_number: str
+    account_holder_name: str
+    account_type: str  # savings, cheque
+    provider: str  # Utility provider name
+    provider_type: str  # Electricity, Water, Gas, etc.
+    provider_account_number: str
+    payment_frequency: str  # weekly, fortnightly, monthly
+    max_payment_amount: float
+    start_date: str
+    status: str = "active"  # active, cancelled, suspended
+    authorization_date: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    signature: str  # Digital signature (user's name as consent)
+    terms_accepted: bool = True
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class DirectDebitRequestCreate(BaseModel):
+    bank_name: str
+    bsb: str
+    account_number: str
+    account_holder_name: str
+    account_type: str
+    provider: str
+    provider_type: str
+    provider_account_number: str
+    payment_frequency: str
+    max_payment_amount: float
+    start_date: str
+    signature: str
+
+class ProviderConnection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    provider_name: str
+    provider_type: str  # Electricity, Water, Gas, Internet, Mobile
+    api_endpoint: Optional[str] = None
+    account_number: str
+    customer_id: Optional[str] = None
+    api_key: Optional[str] = None  # User's provider API key
+    status: str = "connected"  # connected, disconnected, error
+    last_sync: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class ProviderConnectionCreate(BaseModel):
+    provider_name: str
+    provider_type: str
+    account_number: str
+    customer_id: Optional[str] = None
+    api_key: Optional[str] = None
+
 class Transaction(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
