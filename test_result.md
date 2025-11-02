@@ -303,11 +303,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Direct Debit Request (DDR) API Endpoints"
     - "Direct Debit Management UI"
     - "Direct Debit Request Form"
     - "Provider Connection Manager UI"
-    - "Provider Connection API Endpoints"
   stuck_tasks:
     - "Bill OCR Processing Backend"
     - "OpenElectricity API Integration"
