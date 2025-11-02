@@ -23,7 +23,7 @@ const SettingsPage = ({ user, refreshUser }) => {
         </TabsList>
 
         {/* Account Tab */}
-        <TabsContent value="account" className="space-y-6 mt-6"
+        <TabsContent value="account" className="space-y-6 mt-6">
           {/* Account Information */}
           <Card className="shadow-md">
             <CardHeader>
