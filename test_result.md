@@ -161,15 +161,18 @@ backend:
 
   - task: "Provider Connection API Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Endpoints created for provider connections: /api/provider/connect, /api/provider/connections, /api/provider/sync/{id}, /api/provider/disconnect/{id}. Needs testing"
+      - working: true
+        agent: "testing"
+        comment: "All Provider Connection endpoints tested successfully. Provider connection creation works with utility provider details. Connection fetching returns user's connections. Bill sync endpoint works (returns 0 bills as expected for test provider). Provider disconnection works correctly. All endpoints properly require authentication."
 
   - task: "OpenElectricity API Integration"
     implemented: true
