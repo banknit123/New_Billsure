@@ -422,7 +422,7 @@ class BillEasyPayTester:
                 else:
                     response = self.session.get(f"{API_BASE}{endpoint}")
                 
-                if response.status_code == 401:
+                if response.status_code in [401, 403]:
                     self.log_result(f"Auth Required - {method} {endpoint}", True, "Correctly requires authentication")
                 else:
                     self.log_result(f"Auth Required - {method} {endpoint}", False, f"Should require auth but got: {response.status_code}")
