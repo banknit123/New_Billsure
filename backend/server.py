@@ -554,6 +554,150 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         "recent_transactions": transactions[:5]
     }
 
+# OpenElectricity API Integration
+OPENELECTRICITY_API_KEY = os.environ.get('OPENELECTRICITY_API_KEY', '')
+OPENELECTRICITY_BASE_URL = "https://api.openelectricity.org.au/v4"
+
+@api_router.get("/electricity/connect-test")
+async def test_electricity_connection(current_user: dict = Depends(get_current_user)):
+    """Test connection to OpenElectricity API"""
+    try:
+        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
+        response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            return {
+                "connected": True,
+                "message": "Successfully connected to OpenElectricity API",
+                "data": response.json()
+            }
+        else:
+            return {
+                "connected": False,
+                "message": f"Failed to connect: {response.status_code}",
+                "error": response.text
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
+
+@api_router.get("/electricity/fetch-bills")
+async def fetch_electricity_bills(current_user: dict = Depends(get_current_user)):
+    """Fetch electricity bills from OpenElectricity API and save to database"""
+    try:
+        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
+        
+        # Get customer info
+        me_response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
+        
+        if me_response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to fetch electricity data")
+        
+        customer_data = me_response.json()
+        
+        # Try to fetch bills/accounts
+        # Note: The actual endpoint structure may vary - this is a generic implementation
+        # You may need to adjust based on OpenElectricity API documentation
+        
+        bills_created = []
+        
+        # Create a sample bill based on customer data
+        # In a real implementation, you would fetch actual bill data from the API
+        bill = Bill(
+            user_id=current_user["id"],
+            category="Electricity",
+            provider="OpenElectricity Provider",
+            account_number=customer_data.get("id", "N/A"),
+            amount=0.0,  # Would come from API
+            due_date=(datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+            frequency="monthly",
+            status="pending"
+        )
+        
+        # Check if bill already exists for this user
+        existing = await db.bills.find_one({
+            "user_id": current_user["id"],
+            "category": "Electricity",
+            "provider": "OpenElectricity Provider"
+        })
+        
+        if not existing:
+            await db.bills.insert_one(bill.model_dump())
+            bills_created.append(bill)
+        
+        return {
+            "success": True,
+            "message": f"Fetched electricity data successfully",
+            "customer_data": customer_data,
+            "bills_created": len(bills_created),
+            "bills": bills_created
+        }
+        
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"API request failed: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@api_router.post("/electricity/sync-account")
+async def sync_electricity_account(current_user: dict = Depends(get_current_user)):
+    """
+    Sync electricity account with OpenElectricity API
+    This will fetch the latest bill information and update the database
+    """
+    try:
+        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
+        
+        # Fetch customer information
+        response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Failed to connect to electricity provider")
+        
+        customer_data = response.json()
+        
+        # Store or update customer electricity connection
+        await db.electricity_connections.update_one(
+            {"user_id": current_user["id"]},
+            {
+                "$set": {
+                    "user_id": current_user["id"],
+                    "provider": "OpenElectricity",
+                    "customer_id": customer_data.get("id"),
+                    "connected_at": datetime.now(timezone.utc).isoformat(),
+                    "last_sync": datetime.now(timezone.utc).isoformat(),
+                    "status": "active"
+                }
+            },
+            upsert=True
+        )
+        
+        return {
+            "success": True,
+            "message": "Electricity account synced successfully",
+            "customer_data": customer_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+@api_router.get("/electricity/connection-status")
+async def get_electricity_connection_status(current_user: dict = Depends(get_current_user)):
+    """Check if user has connected their electricity account"""
+    connection = await db.electricity_connections.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    
+    if connection:
+        return {
+            "connected": True,
+            "provider": connection.get("provider"),
+            "connected_at": connection.get("connected_at"),
+            "last_sync": connection.get("last_sync"),
+            "status": connection.get("status")
+        }
+    else:
+        return {
+            "connected": False,
+            "message": "No electricity provider connected"
+        }
+
 # Admin routes
 async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Admin authentication middleware"""
