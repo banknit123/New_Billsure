@@ -146,15 +146,18 @@ backend:
 
   - task: "Direct Debit Request (DDR) API Endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Endpoints created for DDR: /api/direct-debit/create, /api/direct-debit/mandates, /api/direct-debit/mandate/{id}/cancel, /api/direct-debit/validate-bsb. Needs comprehensive testing"
+      - working: true
+        agent: "testing"
+        comment: "All DDR endpoints tested successfully. Fixed duplicate BSB parameter bug in create endpoint. BSB validation works for valid (062000=CommBank) and invalid BSBs. DDR creation generates unique mandate references. Mandate fetching and cancellation working correctly. All endpoints properly require authentication."
 
   - task: "Provider Connection API Endpoints"
     implemented: true
