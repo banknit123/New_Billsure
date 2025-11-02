@@ -768,11 +768,14 @@ async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, curren
     # Generate unique mandate reference
     mandate_ref = f"DDR-{uuid.uuid4().hex[:8].upper()}"
     
+    # Create DDR data with formatted BSB
+    ddr_dict = ddr_data.model_dump()
+    ddr_dict["bsb"] = bsb_clean[:3] + "-" + bsb_clean[3:]  # Format as XXX-XXX
+    
     ddr = DirectDebitRequest(
         user_id=current_user["id"],
         mandate_reference=mandate_ref,
-        bsb=bsb_clean[:3] + "-" + bsb_clean[3:],  # Format as XXX-XXX
-        **ddr_data.model_dump()
+        **ddr_dict
     )
     
     await db.direct_debit_requests.insert_one(ddr.model_dump())
