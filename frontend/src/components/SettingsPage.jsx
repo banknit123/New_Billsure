@@ -1,7 +1,10 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { User, CreditCard, Bell, Shield, CheckCircle } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { User, CreditCard, Bell, Shield, CheckCircle, FileText, Zap } from 'lucide-react';
+import DirectDebitManagement from './DirectDebitManagement';
+import ProviderConnectionManager from './ProviderConnectionManager';
 
 const SettingsPage = ({ user }) => {
   return (
