@@ -755,6 +755,183 @@ async def get_electricity_connection_status(current_user: dict = Depends(get_cur
             "message": "No electricity provider connected"
         }
 
+# Direct Debit Request (DDR) Routes
+@api_router.post("/direct-debit/create", response_model=DirectDebitRequest)
+async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new Direct Debit Request mandate"""
+    
+    # Validate BSB (Australian format: XXX-XXX)
+    bsb_clean = ddr_data.bsb.replace("-", "").replace(" ", "")
+    if len(bsb_clean) != 6 or not bsb_clean.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid BSB format. Must be 6 digits (XXX-XXX)")
+    
+    # Generate unique mandate reference
+    mandate_ref = f"DDR-{uuid.uuid4().hex[:8].upper()}"
+    
+    ddr = DirectDebitRequest(
+        user_id=current_user["id"],
+        mandate_reference=mandate_ref,
+        bsb=bsb_clean[:3] + "-" + bsb_clean[3:],  # Format as XXX-XXX
+        **ddr_data.model_dump()
+    )
+    
+    await db.direct_debit_requests.insert_one(ddr.model_dump())
+    
+    return ddr
+
+@api_router.get("/direct-debit/mandates", response_model=List[DirectDebitRequest])
+async def get_direct_debit_mandates(current_user: dict = Depends(get_current_user)):
+    """Get all DDR mandates for the current user"""
+    mandates = await db.direct_debit_requests.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    return mandates
+
+@api_router.get("/direct-debit/mandate/{mandate_id}", response_model=DirectDebitRequest)
+async def get_direct_debit_mandate(mandate_id: str, current_user: dict = Depends(get_current_user)):
+    """Get a specific DDR mandate"""
+    mandate = await db.direct_debit_requests.find_one({"id": mandate_id, "user_id": current_user["id"]}, {"_id": 0})
+    if not mandate:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+    return mandate
+
+@api_router.put("/direct-debit/mandate/{mandate_id}/cancel")
+async def cancel_direct_debit_mandate(mandate_id: str, current_user: dict = Depends(get_current_user)):
+    """Cancel a DDR mandate"""
+    result = await db.direct_debit_requests.update_one(
+        {"id": mandate_id, "user_id": current_user["id"]},
+        {"$set": {"status": "cancelled"}}
+    )
+    
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Mandate not found")
+    
+    return {"message": "Direct Debit mandate cancelled successfully", "mandate_id": mandate_id}
+
+@api_router.post("/direct-debit/validate-bsb")
+async def validate_bsb(bsb: str):
+    """Validate Australian BSB number"""
+    bsb_clean = bsb.replace("-", "").replace(" ", "")
+    
+    if len(bsb_clean) != 6 or not bsb_clean.isdigit():
+        return {"valid": False, "message": "BSB must be 6 digits"}
+    
+    # Basic BSB validation (in production, use a BSB lookup service)
+    # First 2 digits indicate bank: 01-12 = major banks
+    bank_code = int(bsb_clean[:2])
+    
+    bank_names = {
+        "01": "ANZ",
+        "06": "Commonwealth Bank",
+        "08": "NAB",
+        "11": "Westpac",
+        "03": "Bendigo Bank",
+        "09": "Reserve Bank",
+        "73": "Bank of Queensland"
+    }
+    
+    bank_name = bank_names.get(bsb_clean[:2], "Other Bank")
+    
+    return {
+        "valid": True,
+        "formatted": bsb_clean[:3] + "-" + bsb_clean[3:],
+        "bank_name": bank_name,
+        "message": "Valid BSB"
+    }
+
+# Provider Connection Routes
+@api_router.post("/provider/connect", response_model=ProviderConnection)
+async def connect_provider(provider_data: ProviderConnectionCreate, current_user: dict = Depends(get_current_user)):
+    """Connect to a utility provider"""
+    
+    provider = ProviderConnection(
+        user_id=current_user["id"],
+        **provider_data.model_dump()
+    )
+    
+    # Check if connection already exists
+    existing = await db.provider_connections.find_one({
+        "user_id": current_user["id"],
+        "provider_name": provider_data.provider_name,
+        "account_number": provider_data.account_number
+    })
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Provider already connected")
+    
+    await db.provider_connections.insert_one(provider.model_dump())
+    
+    return provider
+
+@api_router.get("/provider/connections", response_model=List[ProviderConnection])
+async def get_provider_connections(current_user: dict = Depends(get_current_user)):
+    """Get all provider connections for the user"""
+    connections = await db.provider_connections.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    return connections
+
+@api_router.post("/provider/sync/{connection_id}")
+async def sync_provider_bills(connection_id: str, current_user: dict = Depends(get_current_user)):
+    """Sync bills from a connected provider"""
+    
+    connection = await db.provider_connections.find_one({"id": connection_id, "user_id": current_user["id"]}, {"_id": 0})
+    
+    if not connection:
+        raise HTTPException(status_code=404, detail="Provider connection not found")
+    
+    # Fetch bills from provider API
+    # This is a generic implementation - specific providers need specific API calls
+    
+    try:
+        bills_fetched = []
+        
+        # Example: If provider has API endpoint
+        if connection.get("api_endpoint") and connection.get("api_key"):
+            headers = {"Authorization": f"Bearer {connection['api_key']}"}
+            response = requests.get(connection["api_endpoint"], headers=headers, timeout=10)
+            
+            if response.status_code == 200:
+                # Parse provider response and create bills
+                # This is provider-specific and would need customization
+                provider_data = response.json()
+                
+                # Create bill from provider data
+                bill = Bill(
+                    user_id=current_user["id"],
+                    category=connection["provider_type"],
+                    provider=connection["provider_name"],
+                    account_number=connection["account_number"],
+                    amount=provider_data.get("amount", 0),
+                    due_date=provider_data.get("due_date", (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()),
+                    frequency="monthly",
+                    status="pending"
+                )
+                
+                await db.bills.insert_one(bill.model_dump())
+                bills_fetched.append(bill)
+        
+        # Update last sync time
+        await db.provider_connections.update_one(
+            {"id": connection_id},
+            {"$set": {"last_sync": datetime.now(timezone.utc).isoformat()}}
+        )
+        
+        return {
+            "success": True,
+            "message": f"Synced {len(bills_fetched)} bills from {connection['provider_name']}",
+            "bills_fetched": len(bills_fetched)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+@api_router.delete("/provider/disconnect/{connection_id}")
+async def disconnect_provider(connection_id: str, current_user: dict = Depends(get_current_user)):
+    """Disconnect from a provider"""
+    result = await db.provider_connections.delete_one({"id": connection_id, "user_id": current_user["id"]})
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Provider connection not found")
+    
+    return {"message": "Provider disconnected successfully"}
+
 # Admin routes
 async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Admin authentication middleware"""
