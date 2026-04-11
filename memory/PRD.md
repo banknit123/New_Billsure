@@ -6,65 +6,54 @@ Build www.billseasypay.com, a comprehensive utility bill management and payment 
 - Company auto-pays customer bills using collected deductions
 - 8% safety buffer on calculations to protect the company from shortfalls
 - Customer dashboard shows paid/outstanding/overdue bills, payment plan status
-- Admin dashboard provides financial overview, outstanding bills by period, future liabilities, and customer analytics
+- Admin dashboard provides financial overview, outstanding bills by period, and customer analytics
+- Real Stripe payment gateway for wallet funding
+- Scheduled auto-deductions that automatically process and pay bills
 
 ## Architecture
 - **Frontend**: React.js, TailwindCSS, Shadcn UI, Recharts, Lucide-React
-- **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pytesseract
+- **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pytesseract, emergentintegrations (Stripe)
+- **Payments**: Stripe Checkout via emergentintegrations library
 - **Design**: Swiss & High-Contrast corporate theme, Outfit + Manrope fonts
-- **OCR**: Server-side pytesseract + Accurassi API (when credentials available)
+- **OCR**: Server-side pytesseract + Accurassi API (ready for credentials)
+- **Scheduler**: asyncio background task for auto-deductions every 60s
 
-## Key Features
+## Key Features Implemented
 1. **Customer Dashboard** - Stats overview, overdue alerts, upcoming/paid bills, plan status
 2. **Bill Management** - Upload via OCR scan or manual entry, table with search/filter
-3. **Smart Payment Plan** - 3 fixed deduction options (weekly/fortnightly/monthly) with 8% safety buffer
-4. **Payment Methods** - CRUD for bank accounts and credit/debit cards
-5. **Auto-Pay Simulation** - Deduction simulation that adds to wallet balance
-6. **Settings** - Bank details, DDR mandates, provider connections
-7. **Admin Financial Overview** - KPIs, collected vs owed, cash flow forecast with charts
-8. **Admin Outstanding Bills** - Bills grouped by period (overdue, 0-30, 30-60, 60-90, 90+ days)
-9. **Admin Customer Analytics** - Risk levels, payment compliance, wallet coverage
+3. **Smart Payment Plan** - 3 fixed deduction options with 8% safety buffer
+4. **Stripe Payment Gateway** - Fund wallet via Stripe checkout ($50/$100/$250/plan amount)
+5. **Scheduled Auto-Deductions** - Background scheduler processes deductions and auto-pays due bills
+6. **Payment Methods** - CRUD for bank accounts and credit/debit cards
+7. **Transaction History** - Full history of deductions, auto-payments, Stripe top-ups
+8. **Settings** - Bank details, DDR mandates, provider connections
+9. **Admin Financial Overview** - KPIs, collected vs owed, cash flow forecast with Recharts
+10. **Admin Outstanding Bills** - Grouped by period (overdue, 0-30, 30-60, 60-90, 90+ days)
+11. **Admin Customer Analytics** - Risk levels, payment compliance, wallet coverage
 
 ## Key API Endpoints
 - Auth: POST /api/auth/register, POST /api/auth/login, GET /api/auth/me
-- Bills: GET/POST /api/bills, GET/PUT/DELETE /api/bills/{id}
-- Bill Extract: POST /api/bills/extract (multipart file upload)
-- Payment Plan: GET /api/payment-plan/calculate, POST /api/payment-plan/select, GET /api/payment-plan/current, POST /api/payment-plan/simulate-deduction
+- Bills: GET/POST /api/bills, GET/PUT/DELETE /api/bills/{id}, POST /api/bills/extract
+- Payment Plan: GET /api/payment-plan/calculate, POST /api/payment-plan/select, GET /api/payment-plan/current
+- Stripe: POST /api/payments/create-checkout, GET /api/payments/status/{id}, POST /api/webhook/stripe, GET /api/payments/history
+- Scheduler: POST /api/scheduler/trigger-now
+- Transactions: GET /api/transactions/history
 - Payment Methods: GET/POST /api/payment-methods, DELETE /api/payment-methods/{id}, PUT /api/payment-methods/{id}/set-primary
 - Admin: GET /api/admin/financial-overview, GET /api/admin/outstanding-by-period, GET /api/admin/customer-analytics
 
-## DB Schema
-- `users`: {id, email, password, full_name, wallet_balance, is_admin}
-- `bills`: {id, user_id, category, provider, account_number, amount, due_date, frequency, status}
-- `payment_plans`: {id, user_id, frequency, deduction_amount, annual_total, buffered_annual, safety_buffer_pct, status, total_collected, total_paid_out}
-- `payment_methods`: {id, user_id, type, label, bank_name, bsb, account_number_masked, card_last4, card_brand, is_primary}
-- `transactions`: {id, user_id, type, amount, description, status}
-- `direct_debit_requests`: {id, user_id, bsb, account_number, provider, max_amount, frequency}
-- `provider_connections`: {id, user_id, provider_name, provider_type, account_number}
-
-## What's Been Implemented (All tested, 100% pass rate)
-- Full customer dashboard with redesigned corporate UI
-- Payment Plan calculator with 3 options + 8% safety buffer
-- Payment Methods CRUD (bank/card)
-- Admin financial overview with Recharts charts
-- Admin outstanding bills by period (overdue/30/60/90+ days)
-- Admin customer analytics with risk levels
-- OCR bill extraction via server-side pytesseract
-- Accurassi API integration (ready for credentials)
-- DDR and Provider Connection management
+## DB Collections
+- `users`, `bills`, `transactions`, `payment_plans`, `payment_methods`, `payment_transactions`, `direct_debit_requests`, `provider_connections`, `bank_details`
 
 ## Mocked Components
-- Payment gateway (simulated deposits/payments)
-- Payment plan deductions (simulated via endpoint)
-- Accurassi API (falls back to OCR when no credentials)
+- Auto-deductions simulate wallet credit (not actual bank debit)
+- Accurassi API falls back to OCR (no credentials)
+- Stripe checkout creates real sessions but status polling falls back to DB
 
 ## P1 - Remaining
-- [ ] Real payment gateway integration (Stripe)
-- [ ] Actual scheduled deductions (currently manual simulation)
-- [ ] Configure real Accurassi API credentials
+- [ ] Email notifications for bill reminders
+- [ ] Export admin reports to PDF/CSV
 
 ## P2 - Backlog
-- [ ] Email notifications for bill reminders
 - [ ] Bill sharing with family/roommates
 - [ ] Payment history timeline view
-- [ ] Export reports to PDF/CSV
+- [ ] Mobile-responsive improvements
