@@ -1073,7 +1073,7 @@ async def get_bulk_payment_report(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     provider: Optional[str] = None,
-    report_type: str = "daily",  # daily, weekly, monthly
+    report_type: str = "daily",  # daily, weekly, monthly, all
     admin_user: dict = Depends(get_admin_user)
 ):
     """
@@ -1083,7 +1083,10 @@ async def get_bulk_payment_report(
     # Calculate date range based on report type
     today = datetime.now(timezone.utc)
     
-    if report_type == "daily":
+    if report_type == "all":
+        start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2030, 12, 31, tzinfo=timezone.utc)
+    elif report_type == "daily":
         start = today.replace(hour=0, minute=0, second=0, microsecond=0)
         end = today.replace(hour=23, minute=59, second=59, microsecond=999999)
     elif report_type == "weekly":
