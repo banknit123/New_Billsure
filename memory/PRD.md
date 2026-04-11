@@ -5,15 +5,15 @@ Build www.billseasypay.com - a utility bill management and payment portal where 
 
 ## Architecture
 - **Frontend**: React.js, TailwindCSS, Shadcn UI, Recharts, Lucide-React
-- **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pytesseract, reportlab, emergentintegrations (Stripe)
+- **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pdfplumber, reportlab, emergentintegrations (Stripe)
 - **Payments**: Stripe Checkout via emergentintegrations
 - **Design**: Swiss corporate theme (Outfit + Manrope fonts), fully mobile-responsive
-- **OCR**: Server-side pytesseract + Accurassi API (ready for credentials)
+- **PDF Extraction**: pdfplumber (pure Python, no system deps) + Accurassi API fallback (ready for credentials)
 - **Schedulers**: Auto-deductions (60s), notifications (120s) via asyncio background tasks
 
 ## All Features Implemented
 1. Customer Dashboard - Stats, overdue alerts, upcoming/paid bills, plan status
-2. Bill Management - Upload via OCR/PDF, manual entry, table with search/filter
+2. Bill Management - Upload via PDF text extraction / manual entry, table with search/filter
 3. Smart Payment Plan - 3 fixed deduction options with 8% safety buffer
 4. Stripe Payment Gateway - Wallet top-ups via Stripe checkout
 5. Scheduled Auto-Deductions - Background auto-pay for due bills
@@ -27,10 +27,16 @@ Build www.billseasypay.com - a utility bill management and payment portal where 
 13. Admin Customer Analytics - Risk levels with CSV export
 14. Mobile Responsive - Collapsible sidebar, responsive grids/tables
 
+## Completed (Feb 2026)
+- [x] Refactored PDF/bill extraction from pytesseract/pdf2image (system deps) to pdfplumber (pure Python)
+- [x] Image uploads gracefully prompt manual entry instead of crashing
+- [x] Removed pytesseract and pdf2image from requirements.txt
+
 ## Mocked Components
 - Email notifications (simulated to console/DB)
 - Auto-deductions (simulated wallet credit)
-- Accurassi API (OCR fallback, no credentials)
+- Accurassi API (PDF extraction fallback, no credentials)
+- Image OCR (requires Accurassi API credentials for image-based bill scanning)
 
 ## P1 - Remaining
 - [ ] Wire up real email service (Resend/SendGrid)
