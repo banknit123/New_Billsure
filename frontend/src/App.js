@@ -1,70 +1,85 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import axios from 'axios';
-import './App.css';
-import LandingPage from './pages/LandingPage';
-import Dashboard from './pages/Dashboard';
-import AdminDashboard from './pages/AdminDashboard';
+import { Toaster } from '@/components/ui/sonner';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import { Toaster } from '@/components/ui/sonner';
+import Dashboard from './pages/Dashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import LandingPage from './pages/LandingPage';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-export const API = `${BACKEND_URL}/api`;
+export const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
-// Create axios instance with interceptor
 export const axiosInstance = axios.create();
 
-axiosInstance.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
-
-// Protected Route Component
-const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-};
+const AuthContext = createContext(null);
+export const useAuth = () => useContext(AuthContext);
 
 function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      axiosInstance.get(`${API}/auth/me`).then(res => {
+        setUser(res.data);
+      }).catch(() => {
+        localStorage.removeItem('token');
+        delete axiosInstance.defaults.headers.common['Authorization'];
+      }).finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = (token, userData) => {
+    localStorage.setItem('token', token);
+    axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    setUser(userData);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    delete axiosInstance.defaults.headers.common['Authorization'];
+    setUser(null);
+  };
+
+  const refreshUser = async () => {
+    try {
+      const res = await axiosInstance.get(`${API}/auth/me`);
+      setUser(res.data);
+    } catch {}
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FAFAFA]">
+        <div className="w-8 h-8 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <>
+    <AuthContext.Provider value={{ user, login, logout, refreshUser }}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/" element={user ? <Navigate to="/dashboard" /> : <LandingPage />} />
+          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
+          <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
           <Route
             path="/dashboard/*"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
+            element={user ? <Dashboard /> : <Navigate to="/login" />}
           />
           <Route
             path="/admin/*"
-            element={
-              <ProtectedRoute>
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
+            element={user?.is_admin ? <AdminDashboard /> : <Navigate to="/login" />}
           />
         </Routes>
+        <Toaster richColors />
       </BrowserRouter>
-      <Toaster position="top-right" richColors />
-    </>
+    </AuthContext.Provider>
   );
 }
 

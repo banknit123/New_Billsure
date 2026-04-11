@@ -1,245 +1,198 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../App';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { DollarSign, Receipt, CheckCircle, AlertCircle, TrendingUp, Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { FileText, DollarSign, Clock, CheckCircle, AlertTriangle, ArrowRight, TrendingUp } from 'lucide-react';
 
 const DashboardHome = ({ user, refreshUser }) => {
-  const navigate = useNavigate();
-  const [stats, setStats] = useState(null);
+  const [bills, setBills] = useState([]);
+  const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchDashboardStats();
+    fetchData();
   }, []);
 
-  const fetchDashboardStats = async () => {
+  const fetchData = async () => {
     try {
-      const response = await axiosInstance.get(`${API}/dashboard/stats`);
-      setStats(response.data);
-    } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
-    } finally {
+      const [billsRes, planRes] = await Promise.all([
+        axiosInstance.get(`${API}/bills`),
+        axiosInstance.get(`${API}/payment-plan/current`),
+      ]);
+      setBills(billsRes.data);
+      setPlan(planRes.data.status === 'none' ? null : planRes.data);
+    } catch {} finally {
       setLoading(false);
     }
   };
 
+  const pending = bills.filter(b => b.status === 'pending');
+  const paid = bills.filter(b => b.status === 'paid');
+  const totalPending = pending.reduce((s, b) => s + (b.amount || 0), 0);
+  const totalPaid = paid.reduce((s, b) => s + (b.amount || 0), 0);
+
+  // Overdue detection
+  const today = new Date().toISOString().slice(0, 10);
+  const overdue = pending.filter(b => (b.due_date || '').slice(0, 10) < today);
+  const upcoming = pending.filter(b => {
+    const d = (b.due_date || '').slice(0, 10);
+    const in30 = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    return d >= today && d <= in30;
+  });
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
+      <div className="space-y-6">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-24 bg-white rounded-lg border border-slate-200 animate-pulse" />
+        ))}
       </div>
     );
   }
 
-  const statCards = [
-    {
-      title: 'Wallet Balance',
-      value: `$${stats?.wallet_balance?.toFixed(2) || '0.00'}`,
-      icon: DollarSign,
-      color: 'text-emerald-600',
-      bgColor: 'bg-emerald-50',
-      testId: 'stat-wallet-balance'
-    },
-    {
-      title: 'Total Bills',
-      value: stats?.total_bills || 0,
-      icon: Receipt,
-      color: 'text-blue-600',
-      bgColor: 'bg-blue-50',
-      testId: 'stat-total-bills'
-    },
-    {
-      title: 'Pending Bills',
-      value: stats?.pending_bills || 0,
-      icon: AlertCircle,
-      color: 'text-orange-600',
-      bgColor: 'bg-orange-50',
-      testId: 'stat-pending-bills'
-    },
-    {
-      title: 'Yearly Prediction',
-      value: `$${stats?.total_yearly_prediction?.toFixed(2) || '0.00'}`,
-      icon: TrendingUp,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-50',
-      testId: 'stat-yearly-prediction'
-    }
-  ];
-
   return (
-    <div className="space-y-6" data-testid="dashboard-home">
-      {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-8 text-white shadow-lg">
-        <h2 className="text-3xl font-bold mb-2">Welcome back, {user?.full_name}!</h2>
-        <p className="text-emerald-50 text-lg">Here's an overview of your bills and payments</p>
-      </div>
-
+    <div className="space-y-8" data-testid="customer-dashboard">
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {statCards.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <Card key={index} className="shadow-md hover:shadow-lg transition-shadow" data-testid={stat.testId}>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600 mb-1">{stat.title}</p>
-                    <p className="text-3xl font-bold text-gray-900">{stat.value}</p>
-                  </div>
-                  <div className={`${stat.bgColor} ${stat.color} p-3 rounded-xl`}>
-                    <Icon size={24} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
+        <StatCard icon={FileText} label="Total Bills" value={bills.length}
+          sub={`${pending.length} pending`} color="blue" />
+        <StatCard icon={DollarSign} label="Outstanding" value={`$${totalPending.toFixed(2)}`}
+          sub={`${pending.length} bills`} color="amber" />
+        <StatCard icon={CheckCircle} label="Paid" value={`$${totalPaid.toFixed(2)}`}
+          sub={`${paid.length} bills`} color="green" />
+        <StatCard icon={TrendingUp} label="Wallet Balance" value={`$${(user?.wallet_balance || 0).toFixed(2)}`}
+          sub="Available funds" color="slate" />
       </div>
 
-      {/* Quick Actions */}
-      <Card className="shadow-md">
-        <CardHeader>
-          <CardTitle>Quick Actions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button 
-              onClick={() => navigate('/dashboard/bills')} 
-              className="bg-emerald-600 hover:bg-emerald-700 h-20 text-lg"
-              data-testid="quick-action-add-bill"
-            >
-              <Plus className="mr-2" size={20} />
-              Add New Bill
-            </Button>
-            <Button 
-              onClick={() => navigate('/dashboard/wallet')} 
-              variant="outline"
-              className="h-20 text-lg border-2 hover:bg-emerald-50"
-              data-testid="quick-action-add-funds"
-            >
-              <DollarSign className="mr-2" size={20} />
-              Add Funds
-            </Button>
-            <Button 
-              onClick={() => navigate('/dashboard/bills')} 
-              variant="outline"
-              className="h-20 text-lg border-2 hover:bg-emerald-50"
-              data-testid="quick-action-view-bills"
-            >
-              <Receipt className="mr-2" size={20} />
-              View All Bills
+      {/* Payment Plan Status */}
+      <Card className="border-slate-200 shadow-sm">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-2">Payment Plan</p>
+              {plan ? (
+                <div>
+                  <p className="text-2xl font-bold text-slate-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                    ${plan.deduction_amount?.toFixed(2)} / {plan.frequency}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Covering ${plan.annual_total?.toFixed(2)}/yr + {plan.safety_buffer_pct}% buffer
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">No plan selected</p>
+                  <p className="text-sm text-slate-500">Set up a payment plan to auto-pay your bills</p>
+                </div>
+              )}
+            </div>
+            <Button onClick={() => navigate('/dashboard/payment-plan')} data-testid="go-to-plan-btn"
+              className="bg-slate-900 hover:bg-slate-800 text-sm">
+              {plan ? 'Manage Plan' : 'Set Up Plan'} <ArrowRight className="ml-2" size={16} />
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Recent Transactions */}
-      <Card className="shadow-md">
-        <CardHeader>
-          <CardTitle>Recent Transactions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {stats?.recent_transactions?.length > 0 ? (
-            <div className="space-y-3">
-              {stats.recent_transactions.map((transaction, index) => (
-                <div 
-                  key={transaction.id} 
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                  data-testid={`transaction-${index}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      transaction.type === 'deposit' ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'
-                    }`}>
-                      {transaction.type === 'deposit' ? <TrendingUp size={20} /> : <Receipt size={20} />}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">{transaction.description}</p>
-                      <p className="text-sm text-gray-500">
-                        {new Date(transaction.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <p className={`font-bold ${
-                    transaction.type === 'deposit' ? 'text-green-600' : 'text-blue-600'
-                  }`}>
-                    {transaction.type === 'deposit' ? '+' : '-'}${transaction.amount.toFixed(2)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-8 text-gray-500">
-              <Receipt className="mx-auto mb-4 text-gray-400" size={48} />
-              <p>No transactions yet</p>
-              <p className="text-sm mt-2">Your recent transactions will appear here</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Upcoming Bills Alert */}
-      {stats?.bills_due_soon > 0 && (
-        <Card className="shadow-md border-l-4 border-l-orange-500 bg-orange-50" data-testid="bills-due-soon-alert">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-4">
-              <AlertCircle className="text-orange-600 flex-shrink-0" size={24} />
-              <div className="flex-1">
-                <h3 className="font-bold text-gray-900 mb-1">Bills Due Soon!</h3>
-                <p className="text-gray-700 mb-3">
-                  You have {stats.bills_due_soon} bill{stats.bills_due_soon > 1 ? 's' : ''} due within the next 7 days
-                </p>
-                {stats.bills_due_soon_list && stats.bills_due_soon_list.length > 0 && (
-                  <div className="space-y-2">
-                    {stats.bills_due_soon_list.slice(0, 3).map((bill, index) => (
-                      <div key={index} className="flex items-center justify-between bg-white p-3 rounded-lg">
-                        <div>
-                          <p className="font-semibold text-gray-900">{bill.category} - {bill.provider}</p>
-                          <p className="text-sm text-gray-600">Due: {new Date(bill.due_date).toLocaleDateString()}</p>
-                        </div>
-                        <p className="font-bold text-orange-600">${bill.amount.toFixed(2)}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <Button 
-                  onClick={() => navigate('/dashboard/bills')} 
-                  className="mt-4 bg-orange-600 hover:bg-orange-700"
-                >
-                  View All Bills
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Insufficient Balance Warning */}
-      {stats?.pending_bills > 0 && stats?.total_bill_amount > 0 && (
-        <Card className="shadow-md border-l-4 border-l-red-500 bg-red-50" data-testid="upcoming-bills-alert">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-4">
-              <AlertCircle className="text-red-600 flex-shrink-0" size={24} />
+      {/* Alerts */}
+      {overdue.length > 0 && (
+        <Card className="border-red-200 bg-red-50 shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
               <div>
-                <h3 className="font-bold text-gray-900 mb-1">Upcoming Bills</h3>
-                <p className="text-gray-700">
-                  You have {stats.pending_bills} pending bill{stats.pending_bills > 1 ? 's' : ''} totaling <span className="font-bold">${stats.total_bill_amount.toFixed(2)}</span>
+                <p className="font-semibold text-red-900 text-sm">
+                  {overdue.length} Overdue Bill{overdue.length > 1 ? 's' : ''}
                 </p>
-                <p className="text-sm text-gray-600 mt-2">
-                  {stats.wallet_balance < stats.total_bill_amount ? (
-                    <span className="text-red-600 font-semibold">⚠️ Insufficient balance. Please add funds to your wallet.</span>
-                  ) : (
-                    <span className="text-green-600 font-semibold">✓ Your wallet has sufficient balance to cover these bills.</span>
-                  )}
+                <p className="text-xs text-red-700 mt-1">
+                  Total: ${overdue.reduce((s, b) => s + b.amount, 0).toFixed(2)} overdue
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Two columns: Upcoming + Recent Paid */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        {/* Upcoming Bills */}
+        <Card className="border-slate-200 shadow-sm">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs tracking-widest uppercase font-medium text-slate-400">Upcoming (30 days)</p>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard/bills')}
+                className="text-blue-600 text-xs" data-testid="view-all-bills-btn">
+                View All
+              </Button>
+            </div>
+            {upcoming.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4">No bills due in the next 30 days</p>
+            ) : (
+              <div className="space-y-3">
+                {upcoming.slice(0, 5).map(bill => (
+                  <div key={bill.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{bill.provider}</p>
+                      <p className="text-xs text-slate-500">{bill.category} &middot; Due {bill.due_date?.slice(0, 10)}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-900">${bill.amount?.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recently Paid */}
+        <Card className="border-slate-200 shadow-sm">
+          <CardContent className="p-6">
+            <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-4">Recently Paid</p>
+            {paid.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4">No paid bills yet</p>
+            ) : (
+              <div className="space-y-3">
+                {paid.slice(0, 5).map(bill => (
+                  <div key={bill.id} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
+                    <div>
+                      <p className="text-sm font-medium text-slate-900">{bill.provider}</p>
+                      <p className="text-xs text-slate-500">{bill.category}</p>
+                    </div>
+                    <span className="text-sm font-semibold text-green-600">${bill.amount?.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
+  );
+};
+
+const StatCard = ({ icon: Icon, label, value, sub, color }) => {
+  const colorMap = {
+    blue: 'bg-blue-50 text-blue-600',
+    amber: 'bg-amber-50 text-amber-600',
+    green: 'bg-green-50 text-green-600',
+    slate: 'bg-slate-100 text-slate-600',
+  };
+  return (
+    <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid={`stat-${label.toLowerCase().replace(/\s/g, '-')}`}>
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs tracking-wider uppercase font-medium text-slate-400">{label}</p>
+            <p className="text-2xl font-bold text-slate-900 mt-1" style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</p>
+            <p className="text-xs text-slate-500 mt-1">{sub}</p>
+          </div>
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
+            <Icon size={20} strokeWidth={1.5} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

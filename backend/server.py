@@ -238,6 +238,30 @@ class MockPayment(BaseModel):
     amount: float
     payment_method: str = "card"
 
+class PaymentMethod(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    type: str  # bank_account, credit_card, debit_card
+    label: str  # "Commonwealth Bank Savings", "Visa ending 4242"
+    bank_name: Optional[str] = None
+    bsb: Optional[str] = None
+    account_number_masked: Optional[str] = None
+    card_last4: Optional[str] = None
+    card_brand: Optional[str] = None
+    is_primary: bool = False
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class PaymentMethodCreate(BaseModel):
+    type: str
+    label: str
+    bank_name: Optional[str] = None
+    bsb: Optional[str] = None
+    account_number: Optional[str] = None
+    card_number: Optional[str] = None
+    card_brand: Optional[str] = None
+    is_primary: bool = False
+
 # Routes
 @api_router.get("/")
 async def root():
@@ -1183,6 +1207,291 @@ async def process_bulk_payment(
         "message": f"Bulk payment processed for {provider}",
         "bills_updated": result.modified_count
     }
+
+# ===================== PAYMENT METHODS =====================
+@api_router.post("/payment-methods")
+async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Depends(get_current_user)):
+    masked_account = None
+    card_last4 = None
+    if data.type == "bank_account" and data.account_number:
+        masked_account = "****" + data.account_number[-4:]
+    if data.type in ("credit_card", "debit_card") and data.card_number:
+        card_last4 = data.card_number[-4:]
+
+    if data.is_primary:
+        await db.payment_methods.update_many(
+            {"user_id": current_user["id"]}, {"$set": {"is_primary": False}}
+        )
+
+    pm = PaymentMethod(
+        user_id=current_user["id"],
+        type=data.type,
+        label=data.label,
+        bank_name=data.bank_name,
+        bsb=data.bsb,
+        account_number_masked=masked_account,
+        card_last4=card_last4,
+        card_brand=data.card_brand,
+        is_primary=data.is_primary,
+    )
+    await db.payment_methods.insert_one(pm.model_dump())
+    return pm.model_dump()
+
+@api_router.get("/payment-methods")
+async def get_payment_methods(current_user: dict = Depends(get_current_user)):
+    methods = await db.payment_methods.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(100)
+    return methods
+
+@api_router.delete("/payment-methods/{method_id}")
+async def delete_payment_method(method_id: str, current_user: dict = Depends(get_current_user)):
+    r = await db.payment_methods.delete_one({"id": method_id, "user_id": current_user["id"]})
+    if r.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    return {"message": "Payment method removed"}
+
+@api_router.put("/payment-methods/{method_id}/set-primary")
+async def set_primary_payment_method(method_id: str, current_user: dict = Depends(get_current_user)):
+    await db.payment_methods.update_many(
+        {"user_id": current_user["id"]}, {"$set": {"is_primary": False}}
+    )
+    r = await db.payment_methods.update_one(
+        {"id": method_id, "user_id": current_user["id"]}, {"$set": {"is_primary": True}}
+    )
+    if r.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    return {"message": "Primary payment method updated"}
+
+
+# ===================== SMART PAYMENT PLAN =====================
+SAFETY_BUFFER = 0.08  # 8% buffer
+
+def _calc_annual_total(bills: list) -> float:
+    total = 0
+    for b in bills:
+        amt = b.get("amount", 0)
+        freq = b.get("frequency", "monthly")
+        if freq == "monthly":
+            total += amt * 12
+        elif freq == "quarterly":
+            total += amt * 4
+        elif freq == "yearly":
+            total += amt
+        elif freq == "fortnightly":
+            total += amt * 26
+        elif freq == "weekly":
+            total += amt * 52
+    return total
+
+
+@api_router.get("/payment-plan/calculate")
+async def calculate_payment_plan(current_user: dict = Depends(get_current_user)):
+    """Calculate 3 deduction options based on all user bills with safety buffer."""
+    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    annual_total = _calc_annual_total(bills)
+    buffered_annual = annual_total * (1 + SAFETY_BUFFER)
+
+    weekly = round(buffered_annual / 52, 2)
+    fortnightly = round(buffered_annual / 26, 2)
+    monthly = round(buffered_annual / 12, 2)
+
+    return {
+        "annual_bill_total": round(annual_total, 2),
+        "safety_buffer_pct": SAFETY_BUFFER * 100,
+        "buffered_annual": round(buffered_annual, 2),
+        "total_pending_bills": len(bills),
+        "options": [
+            {"frequency": "weekly", "amount": weekly, "deductions_per_year": 52, "label": "Weekly"},
+            {"frequency": "fortnightly", "amount": fortnightly, "deductions_per_year": 26, "label": "Fortnightly"},
+            {"frequency": "monthly", "amount": monthly, "deductions_per_year": 12, "label": "Monthly"},
+        ]
+    }
+
+
+@api_router.post("/payment-plan/select")
+async def select_payment_plan(frequency: str, current_user: dict = Depends(get_current_user)):
+    if frequency not in ("weekly", "fortnightly", "monthly"):
+        raise HTTPException(status_code=400, detail="Invalid frequency")
+
+    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    annual_total = _calc_annual_total(bills)
+    buffered = annual_total * (1 + SAFETY_BUFFER)
+
+    divisors = {"weekly": 52, "fortnightly": 26, "monthly": 12}
+    days_map = {"weekly": 7, "fortnightly": 14, "monthly": 30}
+    amount = round(buffered / divisors[frequency], 2)
+
+    plan = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "frequency": frequency,
+        "deduction_amount": amount,
+        "annual_total": round(annual_total, 2),
+        "buffered_annual": round(buffered, 2),
+        "safety_buffer_pct": SAFETY_BUFFER * 100,
+        "next_deduction_date": (datetime.now(timezone.utc) + timedelta(days=days_map[frequency])).isoformat(),
+        "status": "active",
+        "total_collected": 0,
+        "total_paid_out": 0,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await db.payment_plans.delete_many({"user_id": current_user["id"]})
+    await db.payment_plans.insert_one(plan)
+    plan.pop("_id", None)
+    return plan
+
+
+@api_router.get("/payment-plan/current")
+async def get_current_plan(current_user: dict = Depends(get_current_user)):
+    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not plan:
+        return {"status": "none", "message": "No payment plan selected"}
+    return plan
+
+
+@api_router.post("/payment-plan/simulate-deduction")
+async def simulate_deduction(current_user: dict = Depends(get_current_user)):
+    """Simulate a scheduled deduction from customer's payment method."""
+    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not plan or plan.get("status") != "active":
+        raise HTTPException(status_code=400, detail="No active payment plan")
+
+    amount = plan["deduction_amount"]
+    # Record transaction
+    tx = Transaction(
+        user_id=current_user["id"],
+        type="plan_deduction",
+        amount=amount,
+        description=f"Scheduled {plan['frequency']} deduction"
+    )
+    await db.transactions.insert_one(tx.model_dump())
+    # Update wallet and plan
+    await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
+    await db.payment_plans.update_one(
+        {"user_id": current_user["id"]},
+        {"$inc": {"total_collected": amount}}
+    )
+    return {"message": f"Deduction of ${amount:.2f} processed", "amount": amount}
+
+
+# ===================== ENHANCED ADMIN ANALYTICS =====================
+@api_router.get("/admin/financial-overview")
+async def admin_financial_overview(admin_user: dict = Depends(get_admin_user)):
+    """Company financial dashboard: collected vs owed, cash flow."""
+    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_paid = await db.bills.find({"status": "paid"}, {"_id": 0}).to_list(10000)
+    all_users = await db.users.count_documents({})
+    active_plans = [p for p in all_plans if p.get("status") == "active"]
+
+    total_collected = sum(p.get("total_collected", 0) for p in all_plans)
+    total_paid_out = sum(p.get("total_paid_out", 0) for p in all_plans)
+    total_wallet = sum(
+        (await db.users.find({}, {"_id": 0, "wallet_balance": 1}).to_list(10000))
+        and [u.get("wallet_balance", 0) for u in await db.users.find({}, {"_id": 0, "wallet_balance": 1}).to_list(10000)]
+    )
+    total_pending_amount = sum(b.get("amount", 0) for b in all_pending)
+    total_paid_amount = sum(b.get("amount", 0) for b in all_paid)
+
+    # Monthly collection forecast
+    monthly_forecast = sum(p.get("deduction_amount", 0) * (12 if p.get("frequency") == "monthly" else 26 if p.get("frequency") == "fortnightly" else 52) / 12 for p in active_plans)
+
+    return {
+        "total_users": all_users,
+        "active_plans": len(active_plans),
+        "total_collected": round(total_collected, 2),
+        "total_paid_out": round(total_paid_out, 2),
+        "company_float": round(total_collected - total_paid_out, 2),
+        "total_pending_bills": len(all_pending),
+        "total_pending_amount": round(total_pending_amount, 2),
+        "total_paid_bills": len(all_paid),
+        "total_paid_amount": round(total_paid_amount, 2),
+        "monthly_collection_forecast": round(monthly_forecast, 2),
+    }
+
+
+@api_router.get("/admin/outstanding-by-period")
+async def admin_outstanding_by_period(admin_user: dict = Depends(get_admin_user)):
+    """Outstanding bills grouped by time period for finance management."""
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    overdue, this_month, next_30, next_60, next_90, beyond = [], [], [], [], [], []
+    today_dt = datetime.now(timezone.utc)
+
+    for b in all_pending:
+        due_str = b.get("due_date", "")[:10]
+        if not due_str:
+            continue
+        try:
+            due_dt = datetime.strptime(due_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        days_away = (due_dt - today_dt).days
+        entry = {
+            "bill_id": b["id"], "user_id": b.get("user_id"), "provider": b.get("provider"),
+            "category": b.get("category"), "amount": b.get("amount", 0),
+            "due_date": due_str, "days_until_due": days_away
+        }
+        if days_away < 0:
+            overdue.append(entry)
+        elif days_away <= 30:
+            this_month.append(entry)
+        elif days_away <= 60:
+            next_60.append(entry)
+        elif days_away <= 90:
+            next_90.append(entry)
+        else:
+            beyond.append(entry)
+
+    def _summarize(lst):
+        return {"count": len(lst), "total": round(sum(x["amount"] for x in lst), 2), "bills": lst}
+
+    return {
+        "overdue": _summarize(overdue),
+        "next_30_days": _summarize(this_month),
+        "30_to_60_days": _summarize(next_60),
+        "60_to_90_days": _summarize(next_90),
+        "beyond_90_days": _summarize(beyond),
+    }
+
+
+@api_router.get("/admin/customer-analytics")
+async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
+    """Customer-level analytics for risk and compliance."""
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+    analytics = []
+    for u in users:
+        uid = u["id"]
+        bills = await db.bills.find({"user_id": uid}, {"_id": 0}).to_list(1000)
+        plan = await db.payment_plans.find_one({"user_id": uid}, {"_id": 0})
+        pending = [b for b in bills if b.get("status") == "pending"]
+        paid = [b for b in bills if b.get("status") == "paid"]
+        total_pending = sum(b.get("amount", 0) for b in pending)
+        total_paid = sum(b.get("amount", 0) for b in paid)
+
+        risk = "low"
+        if total_pending > u.get("wallet_balance", 0) * 2:
+            risk = "high"
+        elif total_pending > u.get("wallet_balance", 0):
+            risk = "medium"
+
+        analytics.append({
+            "user_id": uid,
+            "name": u.get("full_name", ""),
+            "email": u.get("email", ""),
+            "total_bills": len(bills),
+            "pending_bills": len(pending),
+            "paid_bills": len(paid),
+            "total_pending_amount": round(total_pending, 2),
+            "total_paid_amount": round(total_paid, 2),
+            "wallet_balance": round(u.get("wallet_balance", 0), 2),
+            "has_plan": plan is not None and plan.get("status") == "active",
+            "plan_frequency": plan.get("frequency") if plan else None,
+            "risk_level": risk,
+        })
+    return {"customers": analytics, "total": len(analytics)}
+
 
 # Include router
 app.include_router(api_router)

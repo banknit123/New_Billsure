@@ -1,126 +1,83 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { useAuth, axiosInstance, API } from '../App';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { API } from '../App';
+import { ArrowLeft } from 'lucide-react';
 
-const Login = () => {
-  const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    email: '',
-    password: ''
-  });
+export default function Login() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
-  const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
+  const navigate = useNavigate();
+  const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-
     try {
-      const response = await axios.post(`${API}/auth/login`, formData);
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      toast.success('Login successful!');
-      
-      // Redirect to admin panel if user is admin
-      if (response.data.user.is_admin) {
-        navigate('/admin');
-      } else {
-        navigate('/dashboard');
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Login failed. Please try again.');
+      const res = await axiosInstance.post(`${API}/auth/login`, { email, password });
+      login(res.data.token, res.data.user);
+      toast.success('Welcome back');
+      navigate(res.data.user.is_admin ? '/admin' : '/dashboard');
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Login failed');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-white to-teal-50 px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center mb-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-2xl">B</span>
+    <div className="min-h-screen bg-[#FAFAFA] flex">
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
+        <div className="w-full max-w-sm">
+          <Link to="/" className="inline-flex items-center text-sm text-slate-500 hover:text-slate-900 mb-8 transition-colors">
+            <ArrowLeft size={16} className="mr-1" /> Back
+          </Link>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-1" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            Welcome back
+          </h1>
+          <p className="text-sm text-slate-500 mb-8">Sign in to manage your bills</p>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-600">Email</Label>
+              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com" required data-testid="login-email-input"
+                className="h-11 border-slate-200 focus:border-blue-500 focus:ring-blue-500" />
             </div>
-            <span className="ml-3 text-3xl font-bold text-gray-900">BillEasyPay</span>
-          </div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
-          <p className="text-gray-600 mt-2">Sign in to manage your bills</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-slate-600">Password</Label>
+              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter password" required data-testid="login-password-input"
+                className="h-11 border-slate-200 focus:border-blue-500 focus:ring-blue-500" />
+            </div>
+            <Button type="submit" disabled={loading} data-testid="login-submit-btn"
+              className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-sm font-medium">
+              {loading ? 'Signing in...' : 'Sign In'}
+            </Button>
+          </form>
+
+          <p className="text-sm text-slate-500 text-center mt-6">
+            Don't have an account?{' '}
+            <Link to="/register" className="text-blue-600 hover:underline font-medium">Create one</Link>
+          </p>
         </div>
-
-        <Card className="shadow-xl" data-testid="login-form-card">
-          <CardHeader>
-            <CardTitle>Login</CardTitle>
-            <CardDescription>Enter your credentials to access your dashboard</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={formData.email}
-                  onChange={handleChange}
-                  required
-                  data-testid="login-email-input"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={formData.password}
-                  onChange={handleChange}
-                  required
-                  data-testid="login-password-input"
-                />
-              </div>
-              <Button 
-                type="submit" 
-                className="w-full bg-emerald-600 hover:bg-emerald-700" 
-                disabled={loading}
-                data-testid="login-submit-btn"
-              >
-                {loading ? 'Signing in...' : 'Sign In'}
-              </Button>
-            </form>
-          </CardContent>
-          <CardFooter className="flex justify-center">
-            <p className="text-sm text-gray-600">
-              Don't have an account?{' '}
-              <Link to="/register" className="text-emerald-600 hover:text-emerald-700 font-semibold" data-testid="register-link">
-                Sign up
-              </Link>
-            </p>
-          </CardFooter>
-        </Card>
-
-        <div className="text-center mt-6">
-          <Button variant="ghost" onClick={() => navigate('/')} data-testid="back-home-btn">
-            ← Back to Home
-          </Button>
+      </div>
+      <div className="hidden lg:block lg:w-[45%] bg-slate-900 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900" />
+        <div className="relative z-10 h-full flex flex-col justify-center px-16">
+          <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">BillsEasyPay</p>
+          <h2 className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            One fixed payment covers all your bills
+          </h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Upload your bills, select a plan, and let us handle the rest. Simple, predictable, reliable.
+          </p>
         </div>
       </div>
     </div>
   );
-};
-
-export default Login;
+}

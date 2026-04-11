@@ -1,210 +1,107 @@
-import React, { useState, useEffect } from 'react';
-import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { axiosInstance } from '../App';
-import { API } from '../App';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { toast } from 'sonner';
-import { 
-  LayoutDashboard, 
-  Receipt, 
-  Wallet, 
-  Settings, 
-  LogOut, 
-  Plus,
-  Menu,
-  X,
-  DollarSign,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  TrendingUp
-} from 'lucide-react';
+import React from 'react';
+import { Routes, Route, NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../App';
 import DashboardHome from '../components/DashboardHome';
 import BillsManager from '../components/BillsManager';
-import WalletManager from '../components/WalletManager';
+import PaymentPlanPage from '../components/PaymentPlanPage';
+import PaymentMethodsManager from '../components/PaymentMethodsManager';
 import SettingsPage from '../components/SettingsPage';
+import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Shield } from 'lucide-react';
 
-const Dashboard = () => {
+const navItems = [
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Overview', end: true },
+  { to: '/dashboard/bills', icon: FileText, label: 'Bills' },
+  { to: '/dashboard/payment-plan', icon: Calculator, label: 'Payment Plan' },
+  { to: '/dashboard/payment-methods', icon: CreditCard, label: 'Payment Methods' },
+  { to: '/dashboard/settings', icon: Settings, label: 'Settings' },
+];
+
+export default function Dashboard() {
+  const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
-  const [user, setUser] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
-    // Fetch latest user data
-    fetchUserData();
-  }, []);
-
-  const fetchUserData = async () => {
-    try {
-      const response = await axiosInstance.get(`${API}/auth/me`);
-      setUser(response.data);
-      localStorage.setItem('user', JSON.stringify(response.data));
-    } catch (error) {
-      console.error('Error fetching user data:', error);
-    }
-  };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    toast.success('Logged out successfully');
-    navigate('/login');
+    logout();
+    navigate('/');
   };
 
-  const menuItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard', testId: 'nav-dashboard' },
-    { icon: Receipt, label: 'Bills', path: '/dashboard/bills', testId: 'nav-bills' },
-    { icon: Wallet, label: 'Wallet', path: '/dashboard/wallet', testId: 'nav-wallet' },
-    { icon: Settings, label: 'Settings', path: '/dashboard/settings', testId: 'nav-settings' }
-  ];
-
   return (
-    <div className="min-h-screen bg-gray-50 flex" data-testid="dashboard-container">
+    <div className="min-h-screen bg-[#FAFAFA] flex">
       {/* Sidebar */}
-      <aside 
-        className={`
-          fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out
-          lg:relative lg:translate-x-0
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-        `}
-        data-testid="sidebar"
-      >
-        <div className="h-full flex flex-col">
-          {/* Logo */}
-          <div className="p-6 border-b">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-xl">B</span>
-                </div>
-                <span className="ml-3 text-xl font-bold text-gray-900">BillEasyPay</span>
-              </div>
-              <button 
-                onClick={() => setSidebarOpen(false)} 
-                className="lg:hidden text-gray-500 hover:text-gray-700"
-                data-testid="close-sidebar-btn"
-              >
-                <X size={24} />
-              </button>
-            </div>
-          </div>
+      <aside className="w-60 bg-white border-r border-slate-200 flex flex-col fixed h-full z-20">
+        <div className="px-5 h-16 flex items-center border-b border-slate-200">
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            BillsEasyPay
+          </h1>
+        </div>
 
-          {/* User Info */}
-          <div className="p-6 border-b bg-gradient-to-br from-emerald-50 to-teal-50">
-            <div className="flex items-center">
-              <div className="w-12 h-12 bg-emerald-600 rounded-full flex items-center justify-center">
-                <span className="text-white font-bold text-lg">
-                  {user?.full_name?.charAt(0).toUpperCase() || 'U'}
-                </span>
-              </div>
-              <div className="ml-3">
-                <p className="text-sm font-semibold text-gray-900" data-testid="user-name">{user?.full_name || 'User'}</p>
-                <p className="text-xs text-gray-600">{user?.email}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-2">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = location.pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setSidebarOpen(false)}
-                  className={`
-                    flex items-center gap-3 px-4 py-3 rounded-lg transition-all
-                    ${isActive 
-                      ? 'bg-emerald-600 text-white shadow-md' 
-                      : 'text-gray-700 hover:bg-gray-100'
-                    }
-                  `}
-                  data-testid={item.testId}
-                >
-                  <Icon size={20} />
-                  <span className="font-medium">{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          {/* Logout */}
-          <div className="p-4 border-t">
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
-              onClick={handleLogout}
-              data-testid="logout-btn"
+        <nav className="flex-1 py-4 px-3 space-y-0.5" data-testid="dashboard-nav">
+          {navItems.map(({ to, icon: Icon, label, end }) => (
+            <NavLink key={to} to={to} end={end}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  isActive
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`
+              }
+              data-testid={`nav-${label.toLowerCase().replace(/\s/g, '-')}`}
             >
-              <LogOut size={20} className="mr-3" />
-              Logout
-            </Button>
+              <Icon size={18} strokeWidth={1.5} />
+              {label}
+            </NavLink>
+          ))}
+
+          {user?.is_admin && (
+            <NavLink to="/admin"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-all"
+              data-testid="nav-admin"
+            >
+              <Shield size={18} strokeWidth={1.5} />
+              Admin Panel
+            </NavLink>
+          )}
+        </nav>
+
+        <div className="px-3 py-4 border-t border-slate-200">
+          <div className="px-3 mb-3">
+            <p className="text-sm font-medium text-slate-900 truncate">{user?.full_name}</p>
+            <p className="text-xs text-slate-500 truncate">{user?.email}</p>
           </div>
+          <button onClick={handleLogout} data-testid="logout-btn"
+            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all">
+            <LogOut size={18} strokeWidth={1.5} />
+            Sign Out
+          </button>
         </div>
       </aside>
 
-      {/* Overlay for mobile */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-          data-testid="sidebar-overlay"
-        />
-      )}
-
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <header className="bg-white shadow-sm sticky top-0 z-30">
-          <div className="px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden text-gray-500 hover:text-gray-700"
-                data-testid="open-sidebar-btn"
-              >
-                <Menu size={24} />
-              </button>
-              <div className="flex-1 lg:flex-none">
-                <h1 className="text-2xl font-bold text-gray-900 ml-4 lg:ml-0">
-                  {location.pathname === '/dashboard' && 'Dashboard'}
-                  {location.pathname === '/dashboard/bills' && 'Bills Management'}
-                  {location.pathname === '/dashboard/wallet' && 'Wallet'}
-                  {location.pathname === '/dashboard/settings' && 'Settings'}
-                </h1>
-              </div>
-              <div className="hidden lg:flex items-center gap-4">
-                <div className="bg-emerald-50 px-4 py-2 rounded-lg" data-testid="wallet-balance-display">
-                  <p className="text-xs text-gray-600">Wallet Balance</p>
-                  <p className="text-lg font-bold text-emerald-600">
-                    ${user?.wallet_balance?.toFixed(2) || '0.00'}
-                  </p>
-                </div>
-              </div>
+      <main className="ml-60 flex-1 min-h-screen">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10">
+          <div>
+            <p className="text-sm font-medium text-slate-900">
+              Welcome, {user?.full_name?.split(' ')[0]}
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <p className="text-xs text-slate-500">Wallet Balance</p>
+              <p className="text-sm font-bold text-slate-900">${(user?.wallet_balance || 0).toFixed(2)}</p>
             </div>
           </div>
         </header>
 
-        {/* Content Area */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-auto">
+        <div className="p-8">
           <Routes>
-            <Route path="/" element={<DashboardHome user={user} refreshUser={fetchUserData} />} />
-            <Route path="/bills" element={<BillsManager user={user} refreshUser={fetchUserData} />} />
-            <Route path="/wallet" element={<WalletManager user={user} refreshUser={fetchUserData} />} />
-            <Route path="/settings" element={<SettingsPage user={user} refreshUser={fetchUserData} />} />
+            <Route index element={<DashboardHome user={user} refreshUser={refreshUser} />} />
+            <Route path="bills" element={<BillsManager user={user} refreshUser={refreshUser} />} />
+            <Route path="payment-plan" element={<PaymentPlanPage user={user} refreshUser={refreshUser} />} />
+            <Route path="payment-methods" element={<PaymentMethodsManager user={user} refreshUser={refreshUser} />} />
+            <Route path="settings" element={<SettingsPage user={user} refreshUser={refreshUser} />} />
           </Routes>
-        </main>
-      </div>
+        </div>
+      </main>
     </div>
   );
-};
-
-export default Dashboard;
+}

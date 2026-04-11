@@ -510,6 +510,292 @@ class TestAdminEndpoints:
         print(f"✓ Admin users list: {len(data)} users")
 
 
+class TestPaymentPlan:
+    """Payment Plan endpoints tests (new in redesign)"""
+    
+    @pytest.fixture
+    def auth_headers(self):
+        """Get headers with auth token"""
+        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD
+        })
+        if response.status_code == 200:
+            token = response.json().get("token")
+            return {"Authorization": f"Bearer {token}"}
+        pytest.skip("Authentication failed")
+    
+    def test_calculate_payment_plan(self, auth_headers):
+        """Test GET /api/payment-plan/calculate returns 3 options with buffer"""
+        response = requests.get(f"{BASE_URL}/api/payment-plan/calculate", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "annual_bill_total" in data
+        assert "safety_buffer_pct" in data
+        assert data["safety_buffer_pct"] == 8.0  # 8% buffer
+        assert "buffered_annual" in data
+        assert "options" in data
+        assert len(data["options"]) == 3
+        # Verify all 3 frequencies
+        frequencies = [opt["frequency"] for opt in data["options"]]
+        assert "weekly" in frequencies
+        assert "fortnightly" in frequencies
+        assert "monthly" in frequencies
+        print(f"✓ Payment plan calculated: annual=${data['annual_bill_total']}, buffer={data['safety_buffer_pct']}%")
+    
+    def test_select_payment_plan_weekly(self, auth_headers):
+        """Test POST /api/payment-plan/select creates active plan"""
+        response = requests.post(f"{BASE_URL}/api/payment-plan/select?frequency=weekly", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["frequency"] == "weekly"
+        assert data["status"] == "active"
+        assert "deduction_amount" in data
+        assert "next_deduction_date" in data
+        assert data["safety_buffer_pct"] == 8.0
+        print(f"✓ Weekly plan selected: ${data['deduction_amount']}/week")
+    
+    def test_select_payment_plan_fortnightly(self, auth_headers):
+        """Test selecting fortnightly plan"""
+        response = requests.post(f"{BASE_URL}/api/payment-plan/select?frequency=fortnightly", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["frequency"] == "fortnightly"
+        assert data["status"] == "active"
+        print(f"✓ Fortnightly plan selected: ${data['deduction_amount']}/fortnight")
+    
+    def test_select_payment_plan_monthly(self, auth_headers):
+        """Test selecting monthly plan"""
+        response = requests.post(f"{BASE_URL}/api/payment-plan/select?frequency=monthly", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["frequency"] == "monthly"
+        assert data["status"] == "active"
+        print(f"✓ Monthly plan selected: ${data['deduction_amount']}/month")
+    
+    def test_select_payment_plan_invalid_frequency(self, auth_headers):
+        """Test selecting invalid frequency returns error"""
+        response = requests.post(f"{BASE_URL}/api/payment-plan/select?frequency=daily", headers=auth_headers)
+        assert response.status_code == 400
+        print("✓ Invalid frequency correctly rejected")
+    
+    def test_get_current_plan(self, auth_headers):
+        """Test GET /api/payment-plan/current returns plan or none status"""
+        response = requests.get(f"{BASE_URL}/api/payment-plan/current", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        # Either has active plan or status=none
+        if "status" in data and data["status"] == "none":
+            assert "message" in data
+        else:
+            assert "frequency" in data
+            assert "deduction_amount" in data
+        print(f"✓ Current plan fetched: {data.get('frequency', 'none')}")
+    
+    def test_simulate_deduction(self, auth_headers):
+        """Test POST /api/payment-plan/simulate-deduction adds to wallet"""
+        # First ensure we have an active plan
+        requests.post(f"{BASE_URL}/api/payment-plan/select?frequency=monthly", headers=auth_headers)
+        
+        response = requests.post(f"{BASE_URL}/api/payment-plan/simulate-deduction", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+        assert "amount" in data
+        print(f"✓ Deduction simulated: ${data['amount']}")
+
+
+class TestPaymentMethods:
+    """Payment Methods CRUD tests (new in redesign)"""
+    
+    @pytest.fixture
+    def auth_headers(self):
+        """Get headers with auth token"""
+        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD
+        })
+        if response.status_code == 200:
+            token = response.json().get("token")
+            return {"Authorization": f"Bearer {token}"}
+        pytest.skip("Authentication failed")
+    
+    def test_add_bank_account(self, auth_headers):
+        """Test adding a bank account payment method"""
+        method_data = {
+            "type": "bank_account",
+            "label": f"Test Bank {uuid.uuid4().hex[:6]}",
+            "bank_name": "Commonwealth Bank",
+            "bsb": "062-000",
+            "account_number": "12345678",
+            "is_primary": False
+        }
+        response = requests.post(f"{BASE_URL}/api/payment-methods", json=method_data, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "bank_account"
+        assert "id" in data
+        assert data["account_number_masked"] == "****5678"
+        print(f"✓ Bank account added: {data['label']}")
+        return data["id"]
+    
+    def test_add_credit_card(self, auth_headers):
+        """Test adding a credit card payment method"""
+        method_data = {
+            "type": "credit_card",
+            "label": f"Test Visa {uuid.uuid4().hex[:6]}",
+            "card_number": "4242424242424242",
+            "card_brand": "Visa",
+            "is_primary": False
+        }
+        response = requests.post(f"{BASE_URL}/api/payment-methods", json=method_data, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "credit_card"
+        assert data["card_last4"] == "4242"
+        assert data["card_brand"] == "Visa"
+        print(f"✓ Credit card added: {data['label']}")
+        return data["id"]
+    
+    def test_add_debit_card(self, auth_headers):
+        """Test adding a debit card payment method"""
+        method_data = {
+            "type": "debit_card",
+            "label": f"Test Mastercard {uuid.uuid4().hex[:6]}",
+            "card_number": "5555555555554444",
+            "card_brand": "Mastercard",
+            "is_primary": False
+        }
+        response = requests.post(f"{BASE_URL}/api/payment-methods", json=method_data, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["type"] == "debit_card"
+        assert data["card_last4"] == "4444"
+        print(f"✓ Debit card added: {data['label']}")
+    
+    def test_get_payment_methods(self, auth_headers):
+        """Test fetching all payment methods"""
+        response = requests.get(f"{BASE_URL}/api/payment-methods", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        print(f"✓ Fetched {len(data)} payment methods")
+    
+    def test_set_primary_payment_method(self, auth_headers):
+        """Test setting a payment method as primary"""
+        # First add a method
+        method_data = {
+            "type": "bank_account",
+            "label": f"Primary Test {uuid.uuid4().hex[:6]}",
+            "bank_name": "NAB",
+            "bsb": "082-000",
+            "account_number": "87654321",
+            "is_primary": False
+        }
+        create_response = requests.post(f"{BASE_URL}/api/payment-methods", json=method_data, headers=auth_headers)
+        method_id = create_response.json()["id"]
+        
+        # Set as primary
+        response = requests.put(f"{BASE_URL}/api/payment-methods/{method_id}/set-primary", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+        print(f"✓ Primary payment method set: {method_id}")
+    
+    def test_delete_payment_method(self, auth_headers):
+        """Test deleting a payment method"""
+        # First add a method
+        method_data = {
+            "type": "bank_account",
+            "label": f"Delete Test {uuid.uuid4().hex[:6]}",
+            "bank_name": "Westpac",
+            "bsb": "032-000",
+            "account_number": "11223344",
+            "is_primary": False
+        }
+        create_response = requests.post(f"{BASE_URL}/api/payment-methods", json=method_data, headers=auth_headers)
+        method_id = create_response.json()["id"]
+        
+        # Delete
+        response = requests.delete(f"{BASE_URL}/api/payment-methods/{method_id}", headers=auth_headers)
+        assert response.status_code == 200
+        
+        # Verify deletion by checking list
+        list_response = requests.get(f"{BASE_URL}/api/payment-methods", headers=auth_headers)
+        methods = list_response.json()
+        method_ids = [m["id"] for m in methods]
+        assert method_id not in method_ids
+        print(f"✓ Payment method deleted: {method_id}")
+
+
+class TestAdminAnalytics:
+    """Admin Analytics endpoints tests (new in redesign)"""
+    
+    @pytest.fixture
+    def admin_headers(self):
+        """Get headers with admin auth token"""
+        response = requests.post(f"{BASE_URL}/api/auth/login", json={
+            "email": ADMIN_USER_EMAIL,
+            "password": ADMIN_USER_PASSWORD
+        })
+        if response.status_code == 200:
+            token = response.json().get("token")
+            return {"Authorization": f"Bearer {token}"}
+        pytest.skip("Admin authentication failed")
+    
+    def test_financial_overview(self, admin_headers):
+        """Test GET /api/admin/financial-overview returns KPIs"""
+        response = requests.get(f"{BASE_URL}/api/admin/financial-overview", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "total_users" in data
+        assert "active_plans" in data
+        assert "total_collected" in data
+        assert "total_paid_out" in data
+        assert "company_float" in data
+        assert "total_pending_bills" in data
+        assert "total_pending_amount" in data
+        assert "monthly_collection_forecast" in data
+        print(f"✓ Financial overview: users={data['total_users']}, float=${data['company_float']}")
+    
+    def test_outstanding_by_period(self, admin_headers):
+        """Test GET /api/admin/outstanding-by-period returns grouped bills"""
+        response = requests.get(f"{BASE_URL}/api/admin/outstanding-by-period", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "overdue" in data
+        assert "next_30_days" in data
+        assert "30_to_60_days" in data
+        assert "60_to_90_days" in data
+        assert "beyond_90_days" in data
+        # Each period should have count, total, bills
+        for period in ["overdue", "next_30_days"]:
+            assert "count" in data[period]
+            assert "total" in data[period]
+            assert "bills" in data[period]
+        print(f"✓ Outstanding by period: overdue={data['overdue']['count']}, next30={data['next_30_days']['count']}")
+    
+    def test_customer_analytics(self, admin_headers):
+        """Test GET /api/admin/customer-analytics returns customer risk data"""
+        response = requests.get(f"{BASE_URL}/api/admin/customer-analytics", headers=admin_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert "customers" in data
+        assert "total" in data
+        assert isinstance(data["customers"], list)
+        if len(data["customers"]) > 0:
+            customer = data["customers"][0]
+            assert "user_id" in customer
+            assert "name" in customer
+            assert "email" in customer
+            assert "total_bills" in customer
+            assert "pending_bills" in customer
+            assert "wallet_balance" in customer
+            assert "risk_level" in customer
+            assert customer["risk_level"] in ["low", "medium", "high"]
+        print(f"✓ Customer analytics: {data['total']} customers")
+
+
 class TestOpenElectricityRemoved:
     """Verify OpenElectricity API endpoints are removed"""
     
