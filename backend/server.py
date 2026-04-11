@@ -20,9 +20,8 @@ import base64
 import re
 import io
 import httpx
-import pytesseract
+import pdfplumber
 from PIL import Image
-from pdf2image import convert_from_bytes
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -795,22 +794,23 @@ async def extract_bill_data(
 ):
     """
     Extract bill data from an uploaded file (image or PDF).
-    Uses Accurassi API for PDF electricity bills when credentials are available,
-    falls back to server-side OCR for all other cases.
+    Uses Accurassi API when credentials are available,
+    falls back to pdfplumber (pure Python) for PDFs.
+    Images are opened for validation but require manual entry.
     """
     file_content = await file.read()
     file_type = file.content_type or ''
 
     extracted_text = ""
-    extraction_method = "ocr"
+    extraction_method = "pdfplumber"
 
     try:
         # For PDFs: try Accurassi API first if credentials exist
         if 'pdf' in file_type and ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID:
             try:
                 b64_content = base64.b64encode(file_content).decode('utf-8')
-                async with httpx.AsyncClient(timeout=30) as client:
-                    resp = await client.post(
+                async with httpx.AsyncClient(timeout=30) as http_client:
+                    resp = await http_client.post(
                         f"{ACCURASSI_BASE_URL}/extraction",
                         headers={
                             "clientCode": ACCURASSI_CLIENT_CODE,
@@ -821,7 +821,6 @@ async def extract_bill_data(
                     )
                     if resp.status_code == 200:
                         accurassi_data = resp.json()
-                        accurassi_used = True
                         extraction_method = "accurassi"
                         parsed = {
                             "category": "Electricity",
@@ -836,23 +835,66 @@ async def extract_bill_data(
                         }
                         return parsed
             except Exception as e:
-                logger.warning(f"Accurassi API call failed, falling back to OCR: {e}")
+                logger.warning(f"Accurassi API call failed, falling back to pdfplumber: {e}")
 
-        # OCR fallback for images and PDFs
+        # Pure Python PDF text extraction using pdfplumber
         if 'pdf' in file_type:
-            images = convert_from_bytes(file_content, dpi=300)
-            texts = []
-            for img in images:
-                text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
-                texts.append(text)
-            extracted_text = '\n'.join(texts)
-        else:
-            img = Image.open(io.BytesIO(file_content))
-            img = img.convert('L')  # Grayscale for better OCR
-            extracted_text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
+            try:
+                with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                    texts = []
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            texts.append(page_text)
+                    extracted_text = '\n'.join(texts)
+            except Exception as e:
+                logger.warning(f"pdfplumber extraction failed: {e}")
+                # Fallback: try pypdfium2
+                try:
+                    import pypdfium2 as pdfium
+                    pdf_doc = pdfium.PdfDocument(file_content)
+                    texts = []
+                    for page in pdf_doc:
+                        textpage = page.get_textpage()
+                        page_text = textpage.get_text_range()
+                        if page_text:
+                            texts.append(page_text)
+                        textpage.close()
+                        page.close()
+                    pdf_doc.close()
+                    extracted_text = '\n'.join(texts)
+                    extraction_method = "pypdfium2"
+                except Exception as e2:
+                    logger.error(f"pypdfium2 fallback also failed: {e2}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Could not extract text from this PDF. It may be a scanned/image-only PDF. Please enter bill details manually."
+                    )
 
-        if not extracted_text or len(extracted_text.strip()) < 10:
-            raise HTTPException(status_code=400, detail="Could not extract text from the file. Please try a clearer image.")
+            if not extracted_text or len(extracted_text.strip()) < 10:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No readable text found in PDF. This may be a scanned document. Please enter bill details manually."
+                )
+
+        else:
+            # Image files (JPG, PNG): validate the image but inform user
+            try:
+                img = Image.open(io.BytesIO(file_content))
+                img.verify()
+                extraction_method = "manual"
+                return {
+                    "category": None,
+                    "provider": None,
+                    "account_number": None,
+                    "amount": None,
+                    "due_date": None,
+                    "extracted_text": "Image uploaded successfully. Automatic text extraction from images requires the Accurassi API. Please fill in the bill details manually below.",
+                    "extraction_method": "manual",
+                    "requires_manual_entry": True
+                }
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid JPG, PNG, or PDF.")
 
         parsed = parse_bill_text_server(extracted_text)
         parsed['extracted_text'] = extracted_text[:2000]
@@ -874,7 +916,7 @@ async def get_accurassi_status(current_user: dict = Depends(get_current_user)):
     return {
         "configured": has_credentials,
         "ocr_available": True,
-        "message": "Accurassi API connected" if has_credentials else "Using OCR extraction (configure Accurassi credentials for enhanced PDF extraction)"
+        "message": "Accurassi API connected" if has_credentials else "Using PDF text extraction (configure Accurassi credentials for enhanced image and scanned PDF extraction)"
     }
 
 # Direct Debit Request (DDR) Routes

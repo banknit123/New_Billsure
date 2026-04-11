@@ -89,7 +89,7 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
       });
 
       const data = res.data;
-      setExtractionMethod(data.extraction_method || 'ocr');
+      setExtractionMethod(data.extraction_method || 'pdfplumber');
       setFormData({
         category: data.category || '',
         provider: data.provider || '',
@@ -100,7 +100,11 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
         bpay_code: data.bpay_code || ''
       });
       setExtracted(true);
-      toast.success('Bill details extracted! Please review and save.');
+      if (data.requires_manual_entry) {
+        toast.info('Image uploaded. Please enter bill details manually.');
+      } else {
+        toast.success('Bill details extracted! Please review and save.');
+      }
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Extraction failed. Try a clearer image.');
     } finally {
@@ -153,7 +157,7 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
             <CardTitle>Smart Bill Extraction</CardTitle>
             <CardDescription>
               Upload a bill image or PDF to automatically extract details
-              {apiStatus?.configured ? ' (Accurassi API)' : ' (OCR)'}
+              {apiStatus?.configured ? ' (Accurassi API)' : ' (PDF Text Extraction)'}
             </CardDescription>
           </div>
         </div>
@@ -222,7 +226,10 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
             <div className="flex items-center gap-2 mb-2">
               <CheckCircle className="text-green-600" size={20} />
               <span className="font-semibold text-green-900">
-                Details Extracted via {extractionMethod === 'accurassi' ? 'Accurassi API' : 'OCR'}
+                {extractionMethod === 'manual'
+                  ? 'Image Uploaded — Enter Details Below'
+                  : `Details Extracted via ${extractionMethod === 'accurassi' ? 'Accurassi API' : 'PDF Text Extraction'}`
+                }
               </span>
             </div>
             <div className="text-xs text-green-700 grid grid-cols-2 gap-1">
