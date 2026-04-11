@@ -1,28 +1,62 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { axiosInstance, API } from '../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { Calculator, Check, Calendar, DollarSign, Shield, ArrowRight, Loader2 } from 'lucide-react';
+import {
+  Calculator, Check, Calendar, DollarSign, Shield, ArrowRight, Loader2,
+  CreditCard, Zap, History, ExternalLink, Play
+} from 'lucide-react';
 
 const PaymentPlanPage = ({ user, refreshUser }) => {
+  const [searchParams] = useSearchParams();
   const [calcData, setCalcData] = useState(null);
   const [currentPlan, setCurrentPlan] = useState(null);
+  const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selecting, setSelecting] = useState(null);
-  const [simulating, setSimulating] = useState(false);
+  const [checkingOut, setCheckingOut] = useState(null);
+  const [triggering, setTriggering] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const [calcRes, planRes] = await Promise.all([
+      const [calcRes, planRes, txRes] = await Promise.all([
         axiosInstance.get(`${API}/payment-plan/calculate`),
         axiosInstance.get(`${API}/payment-plan/current`),
+        axiosInstance.get(`${API}/transactions/history`),
       ]);
       setCalcData(calcRes.data);
       setCurrentPlan(planRes.data.status === 'none' ? null : planRes.data);
+      setTransactions(txRes.data);
     } catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Handle Stripe redirect back
+  useEffect(() => {
+    const sessionId = searchParams.get('session_id');
+    if (sessionId) {
+      pollPaymentStatus(sessionId);
+    }
+  }, [searchParams]);
+
+  const pollPaymentStatus = async (sessionId) => {
+    try {
+      const res = await axiosInstance.get(`${API}/payments/status/${sessionId}`);
+      if (res.data.payment_status === 'paid') {
+        toast.success(`Payment of $${res.data.amount.toFixed(2)} successful! Wallet updated.`);
+        refreshUser();
+        fetchData();
+      } else if (res.data.status === 'expired') {
+        toast.error('Payment session expired');
+      } else {
+        toast.info('Payment is being processed...');
+        // Poll again in 3 seconds
+        setTimeout(() => pollPaymentStatus(sessionId), 3000);
+      }
+    } catch {}
   };
 
   const selectPlan = async (freq) => {
@@ -31,21 +65,40 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
       const res = await axiosInstance.post(`${API}/payment-plan/select?frequency=${freq}`);
       setCurrentPlan(res.data);
       toast.success(`${freq.charAt(0).toUpperCase() + freq.slice(1)} plan activated!`);
+      fetchData();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to set plan');
     } finally { setSelecting(null); }
   };
 
-  const simulateDeduction = async () => {
-    setSimulating(true);
+  const handleStripeCheckout = async (packageId) => {
+    setCheckingOut(packageId);
     try {
-      const res = await axiosInstance.post(`${API}/payment-plan/simulate-deduction`);
-      toast.success(res.data.message);
+      const res = await axiosInstance.post(`${API}/payments/create-checkout`, {
+        package_id: packageId,
+        origin_url: window.location.origin,
+      });
+      // Redirect to Stripe
+      window.location.href = res.data.url;
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to create checkout');
+      setCheckingOut(null);
+    }
+  };
+
+  const triggerScheduler = async () => {
+    setTriggering(true);
+    try {
+      const res = await axiosInstance.post(`${API}/scheduler/trigger-now`);
+      const msg = [];
+      if (res.data.deductions_made > 0) msg.push(`${res.data.deductions_made} deduction processed`);
+      if (res.data.bills_paid > 0) msg.push(`${res.data.bills_paid} bill(s) auto-paid`);
+      toast.success(msg.length > 0 ? msg.join(', ') : 'No deductions or bills due right now');
       refreshUser();
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Simulation failed');
-    } finally { setSimulating(false); }
+      toast.error(err.response?.data?.detail || 'Scheduler trigger failed');
+    } finally { setTriggering(false); }
   };
 
   if (loading) {
@@ -66,7 +119,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
           Payment Plan
         </h2>
         <p className="text-sm text-slate-500 mt-1">
-          Choose a fixed deduction amount — we'll pay your bills automatically
+          Choose a fixed deduction amount — bills are auto-paid when due
         </p>
       </div>
 
@@ -101,8 +154,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                 </p>
               </div>
             </div>
-
-            {/* Visual buffer bar */}
+            {/* Buffer bar */}
             <div className="mt-6">
               <div className="flex justify-between text-xs text-slate-500 mb-1">
                 <span>Actual Bills</span>
@@ -153,7 +205,6 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                       ${opt.amount.toFixed(2)}
                     </p>
                     <p className="text-xs text-slate-500 mb-4">per {opt.frequency === 'fortnightly' ? 'fortnight' : opt.frequency.replace('ly', '')}</p>
-
                     <div className="space-y-2 mb-5">
                       <div className="flex items-center gap-2 text-xs text-slate-600">
                         <Calendar size={14} className="text-slate-400" />
@@ -165,16 +216,13 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-600">
                         <Shield size={14} className="text-blue-500" />
-                        <span>{calcData.safety_buffer_pct}% safety buffer included</span>
+                        <span>{calcData.safety_buffer_pct}% safety buffer</span>
                       </div>
                     </div>
-
                     <Button
                       onClick={() => selectPlan(opt.frequency)}
                       disabled={selecting === opt.frequency || isActive}
-                      className={`w-full text-sm ${
-                        isActive ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'
-                      }`}
+                      className={`w-full text-sm ${isActive ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'}`}
                       data-testid={`select-plan-${opt.frequency}`}
                     >
                       {selecting === opt.frequency ? (
@@ -202,19 +250,21 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
         </Card>
       )}
 
-      {/* Active Plan Details */}
+      {/* Active Plan + Fund & Trigger */}
       {currentPlan && (
         <Card className="border-slate-200 shadow-sm">
           <CardContent className="p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-5">
               <p className="text-xs tracking-widest uppercase font-medium text-slate-400">Active Plan Details</p>
-              <Button variant="outline" size="sm" onClick={simulateDeduction} disabled={simulating}
-                className="border-slate-300 text-sm" data-testid="simulate-deduction-btn">
-                {simulating ? <Loader2 className="animate-spin mr-1" size={14} /> : null}
-                Simulate Deduction
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={triggerScheduler} disabled={triggering}
+                  className="border-slate-300 text-sm" data-testid="trigger-scheduler-btn">
+                  {triggering ? <Loader2 className="animate-spin mr-1" size={14} /> : <Play size={14} className="mr-1" />}
+                  Run Auto-Pay Now
+                </Button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
               <div>
                 <p className="text-xs text-slate-500">Deduction</p>
                 <p className="text-lg font-bold text-slate-900">${currentPlan.deduction_amount?.toFixed(2)}</p>
@@ -222,16 +272,89 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
               </div>
               <div>
                 <p className="text-xs text-slate-500">Total Collected</p>
-                <p className="text-lg font-bold text-green-600">${currentPlan.total_collected?.toFixed(2)}</p>
+                <p className="text-lg font-bold text-green-600">${(currentPlan.total_collected || 0).toFixed(2)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500">Total Paid Out</p>
-                <p className="text-lg font-bold text-slate-900">${currentPlan.total_paid_out?.toFixed(2)}</p>
+                <p className="text-lg font-bold text-slate-900">${(currentPlan.total_paid_out || 0).toFixed(2)}</p>
               </div>
               <div>
                 <p className="text-xs text-slate-500">Next Deduction</p>
                 <p className="text-lg font-bold text-slate-900">{currentPlan.next_deduction_date?.slice(0, 10)}</p>
               </div>
+            </div>
+
+            {/* Stripe Top-Up Section */}
+            <div className="border-t border-slate-200 pt-5">
+              <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-3">Fund Wallet via Stripe</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  { id: 'small', label: '$50' },
+                  { id: 'medium', label: '$100' },
+                  { id: 'large', label: '$250' },
+                  { id: 'custom_plan', label: `$${currentPlan.deduction_amount?.toFixed(2)} (Plan)` },
+                ].map(pkg => (
+                  <Button key={pkg.id} variant="outline" size="sm"
+                    onClick={() => handleStripeCheckout(pkg.id)}
+                    disabled={checkingOut === pkg.id}
+                    className="border-slate-300 text-sm h-10 hover:border-blue-400 hover:bg-blue-50"
+                    data-testid={`stripe-topup-${pkg.id}`}
+                  >
+                    {checkingOut === pkg.id ? (
+                      <Loader2 className="animate-spin mr-1" size={14} />
+                    ) : (
+                      <CreditCard size={14} className="mr-1.5 text-blue-600" />
+                    )}
+                    {pkg.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                <ExternalLink size={12} /> Redirects to secure Stripe checkout
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Transaction History */}
+      {transactions.length > 0 && (
+        <Card className="border-slate-200 shadow-sm">
+          <CardContent className="p-0">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center gap-2">
+              <History size={16} className="text-slate-400" />
+              <p className="text-sm font-semibold text-slate-900">Transaction History</p>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {transactions.slice(0, 15).map((tx, i) => (
+                <div key={i} className="px-6 py-3 flex items-center justify-between hover:bg-slate-50 transition-colors" data-testid={`tx-row-${i}`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                      tx.type === 'auto_deduction' || tx.type === 'plan_deduction' || tx.type === 'stripe_topup' || tx.type === 'deposit'
+                        ? 'bg-green-50 text-green-600'
+                        : tx.type === 'auto_bill_payment' || tx.type === 'bill_payment'
+                          ? 'bg-blue-50 text-blue-600'
+                          : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {tx.type.includes('deduction') || tx.type.includes('deposit') || tx.type.includes('topup') ? (
+                        <DollarSign size={16} />
+                      ) : (
+                        <Zap size={16} />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-900">{tx.description}</p>
+                      <p className="text-xs text-slate-500">{tx.type.replace(/_/g, ' ')} &middot; {tx.created_at?.slice(0, 10)}</p>
+                    </div>
+                  </div>
+                  <span className={`text-sm font-semibold ${
+                    tx.type.includes('deduction') || tx.type.includes('deposit') || tx.type.includes('topup')
+                      ? 'text-green-600' : 'text-slate-900'
+                  }`}>
+                    {tx.type.includes('deduction') || tx.type.includes('deposit') || tx.type.includes('topup') ? '+' : '-'}${tx.amount?.toFixed(2)}
+                  </span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>

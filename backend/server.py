@@ -1,13 +1,14 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import asyncio
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Dict
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
@@ -20,6 +21,7 @@ import httpx
 import pytesseract
 from PIL import Image
 from pdf2image import convert_from_bytes
+from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1493,6 +1495,336 @@ async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
     return {"customers": analytics, "total": len(analytics)}
 
 
+# ===================== STRIPE PAYMENT INTEGRATION =====================
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+
+# Wallet top-up packages (server-defined, never from frontend)
+TOPUP_PACKAGES = {
+    "small": 50.0,
+    "medium": 100.0,
+    "large": 250.0,
+    "xlarge": 500.0,
+    "custom_plan": None,  # Will be dynamically set from plan deduction amount
+}
+
+
+class TopUpRequest(BaseModel):
+    package_id: str  # small, medium, large, xlarge, custom_plan
+    origin_url: str
+
+
+@api_router.post("/payments/create-checkout")
+async def create_checkout_session(data: TopUpRequest, request: Request, current_user: dict = Depends(get_current_user)):
+    """Create Stripe checkout session for wallet top-up."""
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    # Determine amount server-side
+    if data.package_id == "custom_plan":
+        plan = await db.payment_plans.find_one({"user_id": current_user["id"], "status": "active"}, {"_id": 0})
+        if not plan:
+            raise HTTPException(status_code=400, detail="No active plan to determine amount")
+        amount = float(plan["deduction_amount"])
+    elif data.package_id in TOPUP_PACKAGES:
+        amount = TOPUP_PACKAGES[data.package_id]
+    else:
+        raise HTTPException(status_code=400, detail="Invalid package")
+
+    host_url = str(request.base_url).rstrip('/')
+    webhook_url = f"{host_url}api/webhook/stripe"
+    stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+    success_url = f"{data.origin_url}/dashboard/payment-plan?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{data.origin_url}/dashboard/payment-plan"
+
+    metadata = {
+        "user_id": current_user["id"],
+        "package_id": data.package_id,
+        "type": "wallet_topup"
+    }
+
+    checkout_req = CheckoutSessionRequest(
+        amount=amount,
+        currency="aud",
+        success_url=success_url,
+        cancel_url=cancel_url,
+        metadata=metadata
+    )
+
+    session = await stripe_checkout.create_checkout_session(checkout_req)
+
+    # Create payment transaction record
+    tx = {
+        "id": str(uuid.uuid4()),
+        "session_id": session.session_id,
+        "user_id": current_user["id"],
+        "amount": amount,
+        "currency": "aud",
+        "package_id": data.package_id,
+        "type": "wallet_topup",
+        "payment_status": "initiated",
+        "status": "pending",
+        "metadata": metadata,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.payment_transactions.insert_one(tx)
+
+    return {"url": session.url, "session_id": session.session_id, "amount": amount}
+
+
+@api_router.get("/payments/status/{session_id}")
+async def check_payment_status(session_id: str, current_user: dict = Depends(get_current_user)):
+    """Poll Stripe for payment status and update records."""
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    # Prevent double crediting
+    if tx.get("payment_status") == "paid":
+        return {"status": "complete", "payment_status": "paid", "amount": tx["amount"], "already_processed": True}
+
+    try:
+        host_url = "https://placeholder.com/"
+        webhook_url = f"{host_url}api/webhook/stripe"
+        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+
+        checkout_status = await stripe_checkout.get_checkout_status(session_id)
+
+        if checkout_status.payment_status == "paid" and tx.get("payment_status") != "paid":
+            # Credit wallet - only once
+            amount = tx["amount"]
+            await db.users.update_one({"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
+            await db.payment_transactions.update_one(
+                {"session_id": session_id},
+                {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
+            )
+            # Record in main transactions collection
+            tx_record = Transaction(
+                user_id=tx["user_id"],
+                type="stripe_topup",
+                amount=amount,
+                description=f"Wallet top-up via Stripe (${amount:.2f})"
+            )
+            await db.transactions.insert_one(tx_record.model_dump())
+
+            # Also update plan total_collected
+            await db.payment_plans.update_one(
+                {"user_id": tx["user_id"], "status": "active"},
+                {"$inc": {"total_collected": amount}}
+            )
+
+        elif checkout_status.status == "expired":
+            await db.payment_transactions.update_one(
+                {"session_id": session_id},
+                {"$set": {"payment_status": "expired", "status": "expired"}}
+            )
+
+        return {
+            "status": checkout_status.status,
+            "payment_status": checkout_status.payment_status,
+            "amount": tx["amount"],
+        }
+    except Exception as e:
+        # If Stripe API call fails (e.g., test key limitations), return current DB status
+        logger.warning(f"Stripe status check failed for {session_id}: {e}")
+        return {
+            "status": tx.get("status", "pending"),
+            "payment_status": tx.get("payment_status", "pending"),
+            "amount": tx["amount"],
+            "note": "Status from database (Stripe API unavailable)"
+        }
+
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events."""
+    try:
+        body = await request.body()
+        sig = request.headers.get("Stripe-Signature", "")
+        host_url = str(request.base_url).rstrip('/')
+        webhook_url = f"{host_url}api/webhook/stripe"
+        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+        event = await stripe_checkout.handle_webhook(body, sig)
+
+        if event.payment_status == "paid":
+            tx = await db.payment_transactions.find_one({"session_id": event.session_id}, {"_id": 0})
+            if tx and tx.get("payment_status") != "paid":
+                amount = tx["amount"]
+                await db.users.update_one({"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
+                await db.payment_transactions.update_one(
+                    {"session_id": event.session_id},
+                    {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
+                )
+                await db.payment_plans.update_one(
+                    {"user_id": tx["user_id"], "status": "active"},
+                    {"$inc": {"total_collected": amount}}
+                )
+
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return {"status": "error"}
+
+
+@api_router.get("/payments/history")
+async def get_payment_history(current_user: dict = Depends(get_current_user)):
+    """Get user's Stripe payment history."""
+    txs = await db.payment_transactions.find(
+        {"user_id": current_user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return txs
+
+
+# ===================== SCHEDULED AUTO-DEDUCTIONS & BILL PAYMENTS =====================
+async def process_auto_deductions():
+    """Background task: process scheduled deductions and auto-pay due bills."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            today_str = now.strftime('%Y-%m-%d')
+
+            # 1. Process plan deductions that are due
+            active_plans = await db.payment_plans.find({"status": "active"}, {"_id": 0}).to_list(10000)
+            for plan in active_plans:
+                next_date_str = plan.get("next_deduction_date", "")[:10]
+                if next_date_str and next_date_str <= today_str:
+                    uid = plan["user_id"]
+                    amount = plan["deduction_amount"]
+                    freq = plan["frequency"]
+
+                    # Deduct from wallet (simulate scheduled collection)
+                    await db.users.update_one({"id": uid}, {"$inc": {"wallet_balance": amount}})
+                    await db.payment_plans.update_one(
+                        {"user_id": uid, "status": "active"},
+                        {
+                            "$inc": {"total_collected": amount},
+                            "$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}
+                        }
+                    )
+                    # Record transaction
+                    tx = Transaction(
+                        user_id=uid,
+                        type="auto_deduction",
+                        amount=amount,
+                        description=f"Scheduled {freq} deduction (${amount:.2f})"
+                    )
+                    await db.transactions.insert_one(tx.model_dump())
+                    logger.info(f"Auto-deduction: ${amount:.2f} for user {uid}")
+
+            # 2. Auto-pay bills that are due today or overdue
+            pending_bills = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+            for bill in pending_bills:
+                due_str = bill.get("due_date", "")[:10]
+                if due_str and due_str <= today_str:
+                    uid = bill["user_id"]
+                    amt = bill["amount"]
+                    user = await db.users.find_one({"id": uid}, {"_id": 0})
+                    if user and user.get("wallet_balance", 0) >= amt:
+                        # Pay the bill
+                        await db.users.update_one({"id": uid}, {"$inc": {"wallet_balance": -amt}})
+                        await db.bills.update_one({"id": bill["id"]}, {"$set": {"status": "paid"}})
+                        await db.payment_plans.update_one(
+                            {"user_id": uid, "status": "active"},
+                            {"$inc": {"total_paid_out": amt}}
+                        )
+                        tx = Transaction(
+                            user_id=uid,
+                            type="auto_bill_payment",
+                            amount=amt,
+                            description=f"Auto-paid {bill['provider']} - {bill['category']} (${amt:.2f})"
+                        )
+                        await db.transactions.insert_one(tx.model_dump())
+                        logger.info(f"Auto-paid bill {bill['id']}: ${amt:.2f} for user {uid}")
+
+        except Exception as e:
+            logger.error(f"Auto-deduction scheduler error: {e}")
+
+        # Run every 60 seconds
+        await asyncio.sleep(60)
+
+
+def _next_deduction_date(freq: str) -> datetime:
+    now = datetime.now(timezone.utc)
+    if freq == "weekly":
+        return now + timedelta(days=7)
+    elif freq == "fortnightly":
+        return now + timedelta(days=14)
+    else:
+        return now + timedelta(days=30)
+
+
+@api_router.post("/scheduler/trigger-now")
+async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
+    """Manually trigger the auto-deduction and bill payment cycle (for testing)."""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime('%Y-%m-%d')
+    deductions_made = 0
+    bills_paid = 0
+
+    # Process plan deductions
+    plan = await db.payment_plans.find_one({"user_id": current_user["id"], "status": "active"}, {"_id": 0})
+    if plan:
+        next_date_str = plan.get("next_deduction_date", "")[:10]
+        if next_date_str and next_date_str <= today_str:
+            amount = plan["deduction_amount"]
+            freq = plan["frequency"]
+            await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
+            await db.payment_plans.update_one(
+                {"user_id": current_user["id"], "status": "active"},
+                {
+                    "$inc": {"total_collected": amount},
+                    "$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}
+                }
+            )
+            tx = Transaction(
+                user_id=current_user["id"], type="auto_deduction", amount=amount,
+                description=f"Manual trigger: {freq} deduction (${amount:.2f})"
+            )
+            await db.transactions.insert_one(tx.model_dump())
+            deductions_made = 1
+
+    # Auto-pay due bills
+    pending_bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    balance = user.get("wallet_balance", 0) if user else 0
+
+    for bill in pending_bills:
+        due_str = bill.get("due_date", "")[:10]
+        if due_str and due_str <= today_str and balance >= bill["amount"]:
+            amt = bill["amount"]
+            await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": -amt}})
+            await db.bills.update_one({"id": bill["id"]}, {"$set": {"status": "paid"}})
+            await db.payment_plans.update_one(
+                {"user_id": current_user["id"], "status": "active"},
+                {"$inc": {"total_paid_out": amt}}
+            )
+            tx = Transaction(
+                user_id=current_user["id"], type="auto_bill_payment", amount=amt,
+                description=f"Auto-paid {bill['provider']} (${amt:.2f})"
+            )
+            await db.transactions.insert_one(tx.model_dump())
+            balance -= amt
+            bills_paid += 1
+
+    return {
+        "message": "Scheduler cycle triggered",
+        "deductions_made": deductions_made,
+        "bills_paid": bills_paid,
+    }
+
+
+@api_router.get("/transactions/history")
+async def get_transaction_history(current_user: dict = Depends(get_current_user)):
+    """Get all user transactions (deductions, bill payments, top-ups)."""
+    txs = await db.transactions.find(
+        {"user_id": current_user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return txs
+
+
 # Include router
 app.include_router(api_router)
 
@@ -1509,6 +1841,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background scheduler for auto-deductions."""
+    asyncio.create_task(process_auto_deductions())
+    logger.info("Auto-deduction scheduler started")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
