@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +13,13 @@ from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
 import requests
+import base64
+import re
+import io
+import httpx
+import pytesseract
+from PIL import Image
+from pdf2image import convert_from_bytes
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -611,149 +618,231 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         "recent_transactions": transactions[:5]
     }
 
-# OpenElectricity API Integration
-OPENELECTRICITY_API_KEY = os.environ.get('OPENELECTRICITY_API_KEY', '')
-OPENELECTRICITY_BASE_URL = "https://api.openelectricity.org.au/v4"
+# Accurassi API Integration
+ACCURASSI_CLIENT_CODE = os.environ.get('ACCURASSI_CLIENT_CODE', '')
+ACCURASSI_CLIENT_ID = os.environ.get('ACCURASSI_CLIENT_ID', '')
+ACCURASSI_BASE_URL = "https://api.accurassi.com/v4"
 
-@api_router.get("/electricity/connect-test")
-async def test_electricity_connection(current_user: dict = Depends(get_current_user)):
-    """Test connection to OpenElectricity API"""
-    try:
-        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
-        response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            return {
-                "connected": True,
-                "message": "Successfully connected to OpenElectricity API",
-                "data": response.json()
-            }
-        else:
-            return {
-                "connected": False,
-                "message": f"Failed to connect: {response.status_code}",
-                "error": response.text
-            }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
 
-@api_router.get("/electricity/fetch-bills")
-async def fetch_electricity_bills(current_user: dict = Depends(get_current_user)):
-    """Fetch electricity bills from OpenElectricity API and save to database"""
-    try:
-        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
-        
-        # Get customer info
-        me_response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
-        
-        if me_response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to fetch electricity data")
-        
-        customer_data = me_response.json()
-        
-        # Try to fetch bills/accounts
-        # Note: The actual endpoint structure may vary - this is a generic implementation
-        # You may need to adjust based on OpenElectricity API documentation
-        
-        bills_created = []
-        
-        # Create a sample bill based on customer data
-        # In a real implementation, you would fetch actual bill data from the API
-        bill = Bill(
-            user_id=current_user["id"],
-            category="Electricity",
-            provider="OpenElectricity Provider",
-            account_number=customer_data.get("id", "N/A"),
-            amount=0.0,  # Would come from API
-            due_date=(datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
-            frequency="monthly",
-            status="pending"
-        )
-        
-        # Check if bill already exists for this user
-        existing = await db.bills.find_one({
-            "user_id": current_user["id"],
-            "category": "Electricity",
-            "provider": "OpenElectricity Provider"
-        })
-        
-        if not existing:
-            await db.bills.insert_one(bill.model_dump())
-            bills_created.append(bill)
-        
-        return {
-            "success": True,
-            "message": f"Fetched electricity data successfully",
-            "customer_data": customer_data,
-            "bills_created": len(bills_created),
-            "bills": bills_created
-        }
-        
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"API request failed: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+def parse_bill_text_server(text: str) -> dict:
+    """Advanced server-side bill text parsing with improved regex patterns"""
+    parsed = {}
+    text_lower = text.lower()
+    lines = text.split('\n')
 
-@api_router.post("/electricity/sync-account")
-async def sync_electricity_account(current_user: dict = Depends(get_current_user)):
-    """
-    Sync electricity account with OpenElectricity API
-    This will fetch the latest bill information and update the database
-    """
-    try:
-        headers = {"Authorization": f"Bearer {OPENELECTRICITY_API_KEY}"}
-        
-        # Fetch customer information
-        response = requests.get(f"{OPENELECTRICITY_BASE_URL}/me", headers=headers, timeout=10)
-        
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to connect to electricity provider")
-        
-        customer_data = response.json()
-        
-        # Store or update customer electricity connection
-        await db.electricity_connections.update_one(
-            {"user_id": current_user["id"]},
-            {
-                "$set": {
-                    "user_id": current_user["id"],
-                    "provider": "OpenElectricity",
-                    "customer_id": customer_data.get("id"),
-                    "connected_at": datetime.now(timezone.utc).isoformat(),
-                    "last_sync": datetime.now(timezone.utc).isoformat(),
-                    "status": "active"
-                }
-            },
-            upsert=True
-        )
-        
-        return {
-            "success": True,
-            "message": "Electricity account synced successfully",
-            "customer_data": customer_data
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+    # --- Amount extraction (priority order) ---
+    amount_patterns = [
+        r'(?:total\s*(?:amount\s*)?due|amount\s*due|balance\s*due|total\s*payable|amount\s*payable|pay\s*this\s*amount)[:\s]*\$?\s*([\d,]+\.?\d{0,2})',
+        r'(?:total\s*charges?|total\s*new\s*charges?|new\s*charges?)[:\s]*\$?\s*([\d,]+\.?\d{0,2})',
+        r'(?:please\s*pay)[:\s]*\$?\s*([\d,]+\.?\d{0,2})',
+        r'(?:amount\s*owing|owing)[:\s]*\$?\s*([\d,]+\.?\d{0,2})',
+    ]
+    for pattern in amount_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            val = float(match.group(1).replace(',', ''))
+            if 1 < val < 50000:
+                parsed['amount'] = val
+                break
 
-@api_router.get("/electricity/connection-status")
-async def get_electricity_connection_status(current_user: dict = Depends(get_current_user)):
-    """Check if user has connected their electricity account"""
-    connection = await db.electricity_connections.find_one({"user_id": current_user["id"]}, {"_id": 0})
-    
-    if connection:
-        return {
-            "connected": True,
-            "provider": connection.get("provider"),
-            "connected_at": connection.get("connected_at"),
-            "last_sync": connection.get("last_sync"),
-            "status": connection.get("status")
-        }
+    if 'amount' not in parsed:
+        dollar_matches = re.findall(r'\$\s*([\d,]+\.\d{2})', text)
+        amounts = [float(m.replace(',', '')) for m in dollar_matches if 5 < float(m.replace(',', '')) < 50000]
+        if amounts:
+            parsed['amount'] = max(amounts)
+
+    # --- Due date extraction ---
+    date_patterns = [
+        r'(?:due\s*(?:date|by)?|pay\s*(?:by|before|on)|payment\s*due)[:\s]*(\d{1,2}[\s/\-\.]+\w{3,9}[\s/\-\.]+\d{2,4})',
+        r'(?:due\s*(?:date|by)?|pay\s*(?:by|before|on)|payment\s*due)[:\s]*(\d{1,2}[\s/\-\.]+\d{1,2}[\s/\-\.]+\d{2,4})',
+        r'(?:due\s*(?:date|by)?|pay\s*(?:by|before|on))[:\s]*(\w{3,9}\s+\d{1,2},?\s*\d{4})',
+    ]
+    for pattern in date_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            raw_date = match.group(1).strip()
+            parsed_date = _try_parse_date(raw_date)
+            if parsed_date:
+                parsed['due_date'] = parsed_date
+                break
+
+    # --- Account number extraction ---
+    account_patterns = [
+        r'(?:account\s*(?:no\.?|number|#|num))[:\s]*([A-Z0-9\-]{5,20})',
+        r'(?:acct\.?\s*(?:no\.?|#)?)[:\s]*([A-Z0-9\-]{5,20})',
+        r'(?:customer\s*(?:no\.?|number|ref|reference|#))[:\s]*([A-Z0-9\-]{5,20})',
+        r'(?:reference\s*(?:no\.?|number|#)?)[:\s]*([A-Z0-9\-]{5,20})',
+    ]
+    for pattern in account_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            parsed['account_number'] = match.group(1).strip()
+            break
+
+    # --- Provider detection ---
+    known_providers = {
+        'agl': 'AGL', 'origin': 'Origin Energy', 'energyaustralia': 'EnergyAustralia',
+        'synergy': 'Synergy', 'alinta': 'Alinta Energy', 'simply energy': 'Simply Energy',
+        'momentum': 'Momentum Energy', 'powershop': 'Powershop', 'red energy': 'Red Energy',
+        'lumo': 'Lumo Energy', 'ergon': 'Ergon Energy', 'ausgrid': 'Ausgrid',
+        'sydney water': 'Sydney Water', 'sa water': 'SA Water', 'yarra valley': 'Yarra Valley Water',
+        'south east water': 'South East Water', 'telstra': 'Telstra', 'optus': 'Optus',
+        'vodafone': 'Vodafone', 'tpg': 'TPG', 'nbn': 'NBN Co', 'dodo': 'Dodo',
+        'iinet': 'iiNet', 'belong': 'Belong', 'aussie broadband': 'Aussie Broadband',
+    }
+    for key, name in known_providers.items():
+        if key in text_lower:
+            parsed['provider'] = name
+            break
+
+    if 'provider' not in parsed:
+        for line in lines[:8]:
+            clean = line.strip()
+            if len(clean) > 3 and re.match(r'^[A-Za-z]', clean) and not re.match(r'^\d+$', clean):
+                if not re.search(r'(tax\s*invoice|bill|statement|page|date|account)', clean, re.IGNORECASE):
+                    parsed['provider'] = clean[:60]
+                    break
+
+    # --- Category detection ---
+    category_keywords = {
+        'Electricity': ['electric', 'power', 'kwh', 'kilowatt', 'energy charge', 'supply charge', 'tariff'],
+        'Water': ['water', 'sewerage', 'drainage', 'water usage', 'water supply'],
+        'Gas': ['gas', 'natural gas', 'gas usage', 'gas supply', 'mj ', 'megajoule'],
+        'Internet': ['internet', 'broadband', 'nbn', 'wifi', 'data plan', 'download'],
+        'Mobile': ['mobile', 'phone', 'call', 'sms', 'data', 'handset', 'sim'],
+        'Council': ['council', 'rates', 'municipal', 'shire', 'city of'],
+        'Insurance': ['insurance', 'premium', 'policy', 'cover', 'insurer'],
+    }
+    for category, keywords in category_keywords.items():
+        if any(kw in text_lower for kw in keywords):
+            parsed['category'] = category
+            break
+
+    # --- BPAY code extraction ---
+    bpay_match = re.search(r'(?:bpay|biller)\s*(?:code|ref)?[:\s]*(\d{4,8})', text, re.IGNORECASE)
+    if bpay_match:
+        parsed['bpay_code'] = bpay_match.group(1)
+
+    # --- Frequency detection ---
+    if any(w in text_lower for w in ['quarterly', 'quarter', '3 month', 'every 3']):
+        parsed['frequency'] = 'quarterly'
+    elif any(w in text_lower for w in ['annual', 'yearly', '12 month']):
+        parsed['frequency'] = 'yearly'
     else:
-        return {
-            "connected": False,
-            "message": "No electricity provider connected"
-        }
+        parsed['frequency'] = 'monthly'
+
+    return parsed
+
+
+def _try_parse_date(raw: str) -> Optional[str]:
+    """Try to parse various date formats into YYYY-MM-DD"""
+    from datetime import datetime as dt
+    formats = [
+        '%d/%m/%Y', '%d-%m-%Y', '%d.%m.%Y',
+        '%d/%m/%y', '%d-%m-%y',
+        '%d %B %Y', '%d %b %Y',
+        '%B %d, %Y', '%b %d, %Y',
+        '%d %B, %Y', '%d %b, %Y',
+        '%m/%d/%Y', '%m-%d-%Y',
+    ]
+    cleaned = re.sub(r'\s+', ' ', raw.strip())
+    for fmt in formats:
+        try:
+            parsed = dt.strptime(cleaned, fmt)
+            return parsed.strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return None
+
+
+@api_router.post("/bills/extract")
+async def extract_bill_data(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Extract bill data from an uploaded file (image or PDF).
+    Uses Accurassi API for PDF electricity bills when credentials are available,
+    falls back to server-side OCR for all other cases.
+    """
+    file_content = await file.read()
+    file_type = file.content_type or ''
+
+    extracted_text = ""
+    extraction_method = "ocr"
+
+    try:
+        # For PDFs: try Accurassi API first if credentials exist
+        if 'pdf' in file_type and ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID:
+            try:
+                b64_content = base64.b64encode(file_content).decode('utf-8')
+                async with httpx.AsyncClient(timeout=30) as client:
+                    resp = await client.post(
+                        f"{ACCURASSI_BASE_URL}/extraction",
+                        headers={
+                            "clientCode": ACCURASSI_CLIENT_CODE,
+                            "clientID": ACCURASSI_CLIENT_ID,
+                            "Content-Type": "application/json"
+                        },
+                        json={"ebillBase64": b64_content}
+                    )
+                    if resp.status_code == 200:
+                        accurassi_data = resp.json()
+                        accurassi_used = True
+                        extraction_method = "accurassi"
+                        parsed = {
+                            "category": "Electricity",
+                            "provider": accurassi_data.get("retailer", ""),
+                            "account_number": accurassi_data.get("accountNumber", ""),
+                            "amount": accurassi_data.get("totalDue", accurassi_data.get("estimatedAnnualCost", 0)),
+                            "due_date": accurassi_data.get("dueDate", ""),
+                            "frequency": "quarterly",
+                            "bpay_code": accurassi_data.get("bpayCode", ""),
+                            "extracted_text": f"Accurassi extraction: annual consumption {accurassi_data.get('estimatedAnnualConsumption', 'N/A')} kWh",
+                            "extraction_method": "accurassi"
+                        }
+                        return parsed
+            except Exception as e:
+                logger.warning(f"Accurassi API call failed, falling back to OCR: {e}")
+
+        # OCR fallback for images and PDFs
+        if 'pdf' in file_type:
+            images = convert_from_bytes(file_content, dpi=300)
+            texts = []
+            for img in images:
+                text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
+                texts.append(text)
+            extracted_text = '\n'.join(texts)
+        else:
+            img = Image.open(io.BytesIO(file_content))
+            img = img.convert('L')  # Grayscale for better OCR
+            extracted_text = pytesseract.image_to_string(img, config='--oem 3 --psm 6')
+
+        if not extracted_text or len(extracted_text.strip()) < 10:
+            raise HTTPException(status_code=400, detail="Could not extract text from the file. Please try a clearer image.")
+
+        parsed = parse_bill_text_server(extracted_text)
+        parsed['extracted_text'] = extracted_text[:2000]
+        parsed['extraction_method'] = extraction_method
+
+        return parsed
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Bill extraction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@api_router.get("/accurassi/status")
+async def get_accurassi_status(current_user: dict = Depends(get_current_user)):
+    """Check Accurassi API integration status"""
+    has_credentials = bool(ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID)
+    return {
+        "configured": has_credentials,
+        "ocr_available": True,
+        "message": "Accurassi API connected" if has_credentials else "Using OCR extraction (configure Accurassi credentials for enhanced PDF extraction)"
+    }
 
 # Direct Debit Request (DDR) Routes
 @api_router.post("/direct-debit/create", response_model=DirectDebitRequest)
@@ -1011,19 +1100,24 @@ async def get_bulk_payment_report(
     if end_date:
         end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
     
-    # Query bills due within date range
-    query = {
-        "status": "pending",
-        "due_date": {
-            "$gte": start.isoformat(),
-            "$lte": end.isoformat()
-        }
-    }
-    
+    # Query all pending bills and filter by date in Python
+    # (due_date may be stored as plain date "YYYY-MM-DD" or ISO datetime)
+    query = {"status": "pending"}
     if provider:
         query["provider"] = {"$regex": provider, "$options": "i"}
-    
-    bills = await db.bills.find(query, {"_id": 0}).to_list(10000)
+
+    all_pending = await db.bills.find(query, {"_id": 0}).to_list(10000)
+
+    start_str = start.strftime('%Y-%m-%d')
+    end_str = end.strftime('%Y-%m-%d')
+
+    bills = []
+    for bill in all_pending:
+        due = bill.get("due_date", "")
+        # Normalize: take only the date portion
+        due_date_str = due[:10] if due else ""
+        if due_date_str and start_str <= due_date_str <= end_str:
+            bills.append(bill)
     
     # Get user details for each bill
     bill_reports = []

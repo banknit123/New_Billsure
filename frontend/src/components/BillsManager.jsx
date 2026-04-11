@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { toast } from 'sonner';
 import { Plus, Edit, Trash2, Receipt, AlertCircle, Upload } from 'lucide-react';
 import BillUploadDialog from './BillUploadDialog';
-import ElectricityConnection from './ElectricityConnection';
+import AccurassiBillExtractor from './AccurassiBillExtractor';
 
 const BILL_CATEGORIES = [
   'Electricity',
@@ -261,8 +261,8 @@ const BillsManager = ({ user, refreshUser }) => {
         </div>
       </div>
 
-      {/* Electricity Provider Connection */}
-      <ElectricityConnection user={user} refreshUser={refreshUser} />
+      {/* Smart Bill Extraction */}
+      <AccurassiBillExtractor user={user} refreshUser={() => { refreshUser(); fetchBills(); }} />
 
       {/* Bills List */}
       {bills.length > 0 ? (

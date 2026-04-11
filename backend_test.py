@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv('/app/frontend/.env')
 
 # Configuration
-BASE_URL = os.getenv('REACT_APP_BACKEND_URL', 'https://billmanager-7.preview.emergentagent.com')
+BASE_URL = os.getenv('REACT_APP_BACKEND_URL', 'https://pay-manager-stage.preview.emergentagent.com')
 API_BASE = f"{BASE_URL}/api"
 
 # Test credentials
