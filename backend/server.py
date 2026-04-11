@@ -1094,11 +1094,15 @@ async def get_admin_stats(admin_user: dict = Depends(get_admin_user)):
 async def get_all_users(admin_user: dict = Depends(get_admin_user)):
     """Get all users with their bill counts"""
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
-    
+
+    # Batch: get bill counts via aggregation
+    pipeline = [{"$group": {"_id": "$user_id", "count": {"$sum": 1}}}]
+    bill_counts = await db.bills.aggregate(pipeline).to_list(10000)
+    count_map = {bc["_id"]: bc["count"] for bc in bill_counts}
+
     for user in users:
-        bill_count = await db.bills.count_documents({"user_id": user["id"]})
-        user["bill_count"] = bill_count
-    
+        user["bill_count"] = count_map.get(user["id"], 0)
+
     return users
 
 @api_router.get("/admin/bulk-payment-report")
@@ -1155,10 +1159,14 @@ async def get_bulk_payment_report(
         if due_date_str and start_str <= due_date_str <= end_str:
             bills.append(bill)
     
-    # Get user details for each bill
+    # Get user details in batch
+    user_ids = list(set(b["user_id"] for b in bills))
+    users_list = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password": 0}).to_list(10000)
+    user_map = {u["id"]: u for u in users_list}
+
     bill_reports = []
     for bill in bills:
-        user = await db.users.find_one({"id": bill["user_id"]}, {"_id": 0, "password": 0})
+        user = user_map.get(bill["user_id"])
         if user:
             bill_reports.append({
                 "bill_id": bill["id"],
@@ -1469,11 +1477,22 @@ async def admin_outstanding_by_period(admin_user: dict = Depends(get_admin_user)
 async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
     """Customer-level analytics for risk and compliance."""
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+
+    # Batch fetch all bills and plans
+    all_bills = await db.bills.find({}, {"_id": 0}).to_list(100000)
+    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+
+    # Build lookup maps
+    bills_by_user = {}
+    for b in all_bills:
+        bills_by_user.setdefault(b.get("user_id"), []).append(b)
+    plan_map = {p["user_id"]: p for p in all_plans}
+
     analytics = []
     for u in users:
         uid = u["id"]
-        bills = await db.bills.find({"user_id": uid}, {"_id": 0}).to_list(1000)
-        plan = await db.payment_plans.find_one({"user_id": uid}, {"_id": 0})
+        bills = bills_by_user.get(uid, [])
+        plan = plan_map.get(uid)
         pending = [b for b in bills if b.get("status") == "pending"]
         paid = [b for b in bills if b.get("status") == "paid"]
         total_pending = sum(b.get("amount", 0) for b in pending)
@@ -1988,13 +2007,21 @@ async def export_customers_csv(admin_user: dict = Depends(get_admin_user)):
     """Export customer analytics as CSV."""
     users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
 
+    # Batch fetch all bills and plans
+    all_bills = await db.bills.find({}, {"_id": 0}).to_list(100000)
+    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+    bills_by_user = {}
+    for b in all_bills:
+        bills_by_user.setdefault(b.get("user_id"), []).append(b)
+    plan_map = {p["user_id"]: p for p in all_plans}
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Name", "Email", "Total Bills", "Pending", "Paid", "Outstanding Amount", "Paid Amount", "Wallet Balance", "Plan", "Risk"])
     for u in users:
         uid = u["id"]
-        bills = await db.bills.find({"user_id": uid}, {"_id": 0}).to_list(1000)
-        plan = await db.payment_plans.find_one({"user_id": uid}, {"_id": 0})
+        bills = bills_by_user.get(uid, [])
+        plan = plan_map.get(uid)
         pending = [b for b in bills if b.get("status") == "pending"]
         paid = [b for b in bills if b.get("status") == "paid"]
         total_pending = sum(b.get("amount", 0) for b in pending)
