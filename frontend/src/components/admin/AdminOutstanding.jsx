@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../../App';
 import { Card, CardContent } from '@/components/ui/card';
-import { AlertTriangle, Clock, Calendar } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle, Clock, Calendar, Download } from 'lucide-react';
 
 const AdminOutstanding = () => {
   const [data, setData] = useState(null);
@@ -14,6 +15,18 @@ const AdminOutstanding = () => {
       const res = await axiosInstance.get(`${API}/admin/outstanding-by-period`);
       setData(res.data);
     } catch {} finally { setLoading(false); }
+  };
+
+  const downloadExport = async (type) => {
+    try {
+      const res = await axiosInstance.get(`${API}/admin/export/${type}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = type.includes('csv') ? `report_${Date.now()}.csv` : `report_${Date.now()}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {}
   };
 
   if (loading) {
@@ -37,11 +50,23 @@ const AdminOutstanding = () => {
 
   return (
     <div className="space-y-6" data-testid="admin-outstanding-bills">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-          Outstanding Bills
-        </h2>
-        <p className="text-sm text-slate-500 mt-1">All customer bills grouped by time period for finance management</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            Outstanding Bills
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">All customer bills grouped by time period for finance management</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => downloadExport('outstanding-csv')}
+            className="border-slate-300 text-xs" data-testid="export-outstanding-csv">
+            <Download size={14} className="mr-1" /> CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => downloadExport('outstanding-pdf')}
+            className="border-slate-300 text-xs" data-testid="export-outstanding-pdf">
+            <Download size={14} className="mr-1" /> PDF
+          </Button>
+        </div>
       </div>
 
       {/* Summary Row */}

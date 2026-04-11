@@ -55,7 +55,7 @@ const DashboardHome = ({ user, refreshUser }) => {
   return (
     <div className="space-y-8" data-testid="customer-dashboard">
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <StatCard icon={FileText} label="Total Bills" value={bills.length}
           sub={`${pending.length} pending`} color="blue" />
         <StatCard icon={DollarSign} label="Outstanding" value={`$${totalPending.toFixed(2)}`}
@@ -180,15 +180,15 @@ const StatCard = ({ icon: Icon, label, value, sub, color }) => {
   };
   return (
     <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow" data-testid={`stat-${label.toLowerCase().replace(/\s/g, '-')}`}>
-      <CardContent className="p-5">
+      <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs tracking-wider uppercase font-medium text-slate-400">{label}</p>
-            <p className="text-2xl font-bold text-slate-900 mt-1" style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</p>
-            <p className="text-xs text-slate-500 mt-1">{sub}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] sm:text-xs tracking-wider uppercase font-medium text-slate-400">{label}</p>
+            <p className="text-lg sm:text-2xl font-bold text-slate-900 mt-1 truncate" style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</p>
+            <p className="text-[10px] sm:text-xs text-slate-500 mt-1 truncate">{sub}</p>
           </div>
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
-            <Icon size={20} strokeWidth={1.5} />
+          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colorMap[color]}`}>
+            <Icon size={18} strokeWidth={1.5} />
           </div>
         </div>
       </CardContent>

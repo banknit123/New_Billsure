@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../../App';
 import { Card, CardContent } from '@/components/ui/card';
-import { Users, AlertTriangle, CheckCircle, Shield } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Users, AlertTriangle, CheckCircle, Shield, Download } from 'lucide-react';
 
 const AdminCustomers = () => {
   const [data, setData] = useState(null);
@@ -16,6 +17,18 @@ const AdminCustomers = () => {
     } catch {} finally { setLoading(false); }
   };
 
+  const downloadExport = async () => {
+    try {
+      const res = await axiosInstance.get(`${API}/admin/export/customers-csv`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `customer_analytics_${Date.now()}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {}
+  };
+
   if (loading) {
     return <div className="space-y-4">{[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-white rounded-lg border animate-pulse" />)}</div>;
   }
@@ -27,11 +40,17 @@ const AdminCustomers = () => {
 
   return (
     <div className="space-y-6" data-testid="admin-customer-analytics">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-          Customer Analytics
-        </h2>
-        <p className="text-sm text-slate-500 mt-1">Payment compliance, risk indicators, and collection metrics</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            Customer Analytics
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">Payment compliance, risk indicators, and collection metrics</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={downloadExport}
+          className="border-slate-300 text-xs self-start" data-testid="export-customers-csv">
+          <Download size={14} className="mr-1" /> Export CSV
+        </Button>
       </div>
 
       {/* Summary */}

@@ -1,11 +1,13 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import asyncio
+import csv
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict
@@ -22,6 +24,11 @@ import pytesseract
 from PIL import Image
 from pdf2image import convert_from_bytes
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1825,6 +1832,295 @@ async def get_transaction_history(current_user: dict = Depends(get_current_user)
     return txs
 
 
+# ===================== NOTIFICATION SYSTEM =====================
+REMINDER_DAYS_BEFORE = 5  # Send reminder X days before due date
+
+async def generate_notifications():
+    """Background task: generate bill reminder notifications."""
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            today_str = now.strftime('%Y-%m-%d')
+            reminder_date = (now + timedelta(days=REMINDER_DAYS_BEFORE)).strftime('%Y-%m-%d')
+
+            users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+            for user in users:
+                uid = user["id"]
+                pending = await db.bills.find({"user_id": uid, "status": "pending"}, {"_id": 0}).to_list(1000)
+                wallet = user.get("wallet_balance", 0)
+
+                for bill in pending:
+                    due_str = bill.get("due_date", "")[:10]
+                    if not due_str:
+                        continue
+
+                    # Overdue notification
+                    if due_str < today_str:
+                        existing = await db.notifications.find_one({
+                            "user_id": uid, "bill_id": bill["id"], "type": "overdue",
+                            "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                        })
+                        if not existing:
+                            await db.notifications.insert_one({
+                                "id": str(uuid.uuid4()),
+                                "user_id": uid,
+                                "bill_id": bill["id"],
+                                "type": "overdue",
+                                "title": f"Overdue: {bill['provider']}",
+                                "message": f"Your {bill['category']} bill of ${bill['amount']:.2f} from {bill['provider']} was due on {due_str}.",
+                                "severity": "critical",
+                                "read": False,
+                                "email_sent": False,
+                                "created_at": now.isoformat(),
+                            })
+
+                    # Upcoming reminder
+                    elif due_str <= reminder_date and due_str >= today_str:
+                        existing = await db.notifications.find_one({
+                            "user_id": uid, "bill_id": bill["id"], "type": "upcoming",
+                            "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                        })
+                        if not existing:
+                            days_left = (datetime.strptime(due_str, '%Y-%m-%d').replace(tzinfo=timezone.utc) - now).days
+                            await db.notifications.insert_one({
+                                "id": str(uuid.uuid4()),
+                                "user_id": uid,
+                                "bill_id": bill["id"],
+                                "type": "upcoming",
+                                "title": f"Due Soon: {bill['provider']}",
+                                "message": f"Your {bill['category']} bill of ${bill['amount']:.2f} is due in {max(days_left, 0)} day(s) ({due_str}).",
+                                "severity": "warning",
+                                "read": False,
+                                "email_sent": False,
+                                "created_at": now.isoformat(),
+                            })
+
+                # Low wallet balance notification
+                total_pending = sum(b.get("amount", 0) for b in pending)
+                if total_pending > 0 and wallet < total_pending * 0.5:
+                    existing = await db.notifications.find_one({
+                        "user_id": uid, "type": "low_balance",
+                        "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                    })
+                    if not existing:
+                        await db.notifications.insert_one({
+                            "id": str(uuid.uuid4()),
+                            "user_id": uid,
+                            "bill_id": None,
+                            "type": "low_balance",
+                            "title": "Low Wallet Balance",
+                            "message": f"Your wallet (${wallet:.2f}) may not cover your pending bills (${total_pending:.2f}). Consider topping up.",
+                            "severity": "warning",
+                            "read": False,
+                            "email_sent": False,
+                            "created_at": now.isoformat(),
+                        })
+
+            # Mark notifications as "email sent" (simulated)
+            unsent = await db.notifications.find({"email_sent": False}).to_list(1000)
+            for n in unsent:
+                logger.info(f"[EMAIL SIM] To user {n['user_id']}: {n['title']} - {n['message']}")
+                await db.notifications.update_one({"id": n["id"]}, {"$set": {"email_sent": True}})
+
+        except Exception as e:
+            logger.error(f"Notification generator error: {e}")
+
+        await asyncio.sleep(120)  # Run every 2 minutes
+
+
+@api_router.get("/notifications")
+async def get_notifications(current_user: dict = Depends(get_current_user)):
+    notifs = await db.notifications.find(
+        {"user_id": current_user["id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    unread = sum(1 for n in notifs if not n.get("read"))
+    return {"notifications": notifs, "unread_count": unread}
+
+
+@api_router.put("/notifications/{notif_id}/read")
+async def mark_notification_read(notif_id: str, current_user: dict = Depends(get_current_user)):
+    await db.notifications.update_one(
+        {"id": notif_id, "user_id": current_user["id"]}, {"$set": {"read": True}}
+    )
+    return {"message": "Marked as read"}
+
+
+@api_router.put("/notifications/read-all")
+async def mark_all_read(current_user: dict = Depends(get_current_user)):
+    await db.notifications.update_many(
+        {"user_id": current_user["id"], "read": False}, {"$set": {"read": True}}
+    )
+    return {"message": "All marked as read"}
+
+
+@api_router.delete("/notifications/{notif_id}")
+async def delete_notification(notif_id: str, current_user: dict = Depends(get_current_user)):
+    await db.notifications.delete_one({"id": notif_id, "user_id": current_user["id"]})
+    return {"message": "Deleted"}
+
+
+# ===================== EXPORT ENDPOINTS =====================
+@api_router.get("/admin/export/outstanding-csv")
+async def export_outstanding_csv(admin_user: dict = Depends(get_admin_user)):
+    """Export outstanding bills as CSV."""
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Provider", "Category", "Amount", "Due Date", "Frequency", "User ID", "Account Number"])
+    for b in all_pending:
+        writer.writerow([
+            b.get("provider", ""), b.get("category", ""), b.get("amount", 0),
+            b.get("due_date", "")[:10], b.get("frequency", ""),
+            b.get("user_id", ""), b.get("account_number", "")
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=outstanding_bills_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+
+@api_router.get("/admin/export/customers-csv")
+async def export_customers_csv(admin_user: dict = Depends(get_admin_user)):
+    """Export customer analytics as CSV."""
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Name", "Email", "Total Bills", "Pending", "Paid", "Outstanding Amount", "Paid Amount", "Wallet Balance", "Plan", "Risk"])
+    for u in users:
+        uid = u["id"]
+        bills = await db.bills.find({"user_id": uid}, {"_id": 0}).to_list(1000)
+        plan = await db.payment_plans.find_one({"user_id": uid}, {"_id": 0})
+        pending = [b for b in bills if b.get("status") == "pending"]
+        paid = [b for b in bills if b.get("status") == "paid"]
+        total_pending = sum(b.get("amount", 0) for b in pending)
+        total_paid = sum(b.get("amount", 0) for b in paid)
+        wallet = u.get("wallet_balance", 0)
+        risk = "high" if total_pending > wallet * 2 else "medium" if total_pending > wallet else "low"
+        writer.writerow([
+            u.get("full_name", ""), u.get("email", ""), len(bills), len(pending), len(paid),
+            f"{total_pending:.2f}", f"{total_paid:.2f}", f"{wallet:.2f}",
+            plan.get("frequency", "none") if plan else "none", risk
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=customer_analytics_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+
+@api_router.get("/admin/export/outstanding-pdf")
+async def export_outstanding_pdf(admin_user: dict = Depends(get_admin_user)):
+    """Export outstanding bills as PDF report."""
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm, leftMargin=15*mm, rightMargin=15*mm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=18, spaceAfter=12)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
+
+    elements = []
+    elements.append(Paragraph("BillsEasyPay - Outstanding Bills Report", title_style))
+    elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
+
+    total = sum(b.get("amount", 0) for b in all_pending)
+    elements.append(Paragraph(f"Total Outstanding: ${total:,.2f} across {len(all_pending)} bills", styles['Normal']))
+    elements.append(Spacer(1, 10*mm))
+
+    # Table
+    data = [["Provider", "Category", "Amount", "Due Date", "Frequency"]]
+    for b in all_pending:
+        data.append([
+            b.get("provider", "")[:30], b.get("category", ""),
+            f"${b.get('amount', 0):,.2f}", b.get("due_date", "")[:10],
+            b.get("frequency", "")
+        ])
+
+    if len(data) > 1:
+        t = Table(data, colWidths=[55*mm, 30*mm, 25*mm, 25*mm, 25*mm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F172A')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ]))
+        elements.append(t)
+
+    doc.build(elements)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=outstanding_bills_{datetime.now().strftime('%Y%m%d')}.pdf"}
+    )
+
+
+@api_router.get("/admin/export/financial-pdf")
+async def export_financial_pdf(admin_user: dict = Depends(get_admin_user)):
+    """Export financial overview as PDF report."""
+    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_paid = await db.bills.find({"status": "paid"}, {"_id": 0}).to_list(10000)
+    all_users = await db.users.count_documents({})
+    active_plans = [p for p in all_plans if p.get("status") == "active"]
+
+    total_collected = sum(p.get("total_collected", 0) for p in all_plans)
+    total_paid_out = sum(p.get("total_paid_out", 0) for p in all_plans)
+    total_pending_amount = sum(b.get("amount", 0) for b in all_pending)
+    total_paid_amount = sum(b.get("amount", 0) for b in all_paid)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm, leftMargin=15*mm, rightMargin=15*mm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=18, spaceAfter=12)
+    subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
+
+    elements = []
+    elements.append(Paragraph("BillsEasyPay - Financial Overview Report", title_style))
+    elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
+
+    # KPI Table
+    kpi_data = [
+        ["Metric", "Value"],
+        ["Total Users", str(all_users)],
+        ["Active Plans", str(len(active_plans))],
+        ["Total Collected", f"${total_collected:,.2f}"],
+        ["Total Paid Out", f"${total_paid_out:,.2f}"],
+        ["Company Float", f"${(total_collected - total_paid_out):,.2f}"],
+        ["Pending Bills", f"{len(all_pending)} (${total_pending_amount:,.2f})"],
+        ["Paid Bills", f"{len(all_paid)} (${total_paid_amount:,.2f})"],
+    ]
+    t = Table(kpi_data, colWidths=[70*mm, 70*mm])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F172A')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(t)
+
+    doc.build(elements)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=financial_overview_{datetime.now().strftime('%Y%m%d')}.pdf"}
+    )
+
+
 # Include router
 app.include_router(api_router)
 
@@ -1844,9 +2140,10 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background scheduler for auto-deductions."""
+    """Start background schedulers."""
     asyncio.create_task(process_auto_deductions())
-    logger.info("Auto-deduction scheduler started")
+    asyncio.create_task(generate_notifications())
+    logger.info("Auto-deduction scheduler and notification generator started")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

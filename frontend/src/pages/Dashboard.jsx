@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import DashboardHome from '../components/DashboardHome';
@@ -6,7 +6,8 @@ import BillsManager from '../components/BillsManager';
 import PaymentPlanPage from '../components/PaymentPlanPage';
 import PaymentMethodsManager from '../components/PaymentMethodsManager';
 import SettingsPage from '../components/SettingsPage';
-import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Shield } from 'lucide-react';
+import NotificationBell from '../components/NotificationBell';
+import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Shield, Menu, X } from 'lucide-react';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Overview', end: true },
@@ -19,25 +20,41 @@ const navItems = [
 export default function Dashboard() {
   const { user, logout, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
 
+  const closeSidebar = () => setSidebarOpen(false);
+
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/30 z-30 lg:hidden" onClick={closeSidebar} />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-60 bg-white border-r border-slate-200 flex flex-col fixed h-full z-20">
-        <div className="px-5 h-16 flex items-center border-b border-slate-200">
+      <aside className={`
+        fixed h-full z-40 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200
+        w-60
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0
+      `}>
+        <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
           <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
             BillsEasyPay
           </h1>
+          <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
+            <X size={20} />
+          </button>
         </div>
 
-        <nav className="flex-1 py-4 px-3 space-y-0.5" data-testid="dashboard-nav">
+        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto" data-testid="dashboard-nav">
           {navItems.map(({ to, icon: Icon, label, end }) => (
-            <NavLink key={to} to={to} end={end}
+            <NavLink key={to} to={to} end={end} onClick={closeSidebar}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive
@@ -53,7 +70,7 @@ export default function Dashboard() {
           ))}
 
           {user?.is_admin && (
-            <NavLink to="/admin"
+            <NavLink to="/admin" onClick={closeSidebar}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-all"
               data-testid="nav-admin"
             >
@@ -77,22 +94,27 @@ export default function Dashboard() {
       </aside>
 
       {/* Main Content */}
-      <main className="ml-60 flex-1 min-h-screen">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-10">
-          <div>
-            <p className="text-sm font-medium text-slate-900">
+      <main className="flex-1 min-h-screen lg:ml-60">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-20">
+          <div className="flex items-center gap-3">
+            <button className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600" onClick={() => setSidebarOpen(true)}
+              data-testid="mobile-menu-btn">
+              <Menu size={20} />
+            </button>
+            <p className="text-sm font-medium text-slate-900 hidden sm:block">
               Welcome, {user?.full_name?.split(' ')[0]}
             </p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <p className="text-xs text-slate-500">Wallet Balance</p>
+          <div className="flex items-center gap-3">
+            <NotificationBell />
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-slate-500">Wallet</p>
               <p className="text-sm font-bold text-slate-900">${(user?.wallet_balance || 0).toFixed(2)}</p>
             </div>
           </div>
         </header>
 
-        <div className="p-8">
+        <div className="p-4 sm:p-6 lg:p-8">
           <Routes>
             <Route index element={<DashboardHome user={user} refreshUser={refreshUser} />} />
             <Route path="bills" element={<BillsManager user={user} refreshUser={refreshUser} />} />

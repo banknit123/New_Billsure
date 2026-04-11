@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../../App';
 import { Card, CardContent } from '@/components/ui/card';
-import { Users, DollarSign, FileText, TrendingUp, AlertTriangle, CheckCircle, BarChart3, Wallet } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Users, DollarSign, FileText, TrendingUp, AlertTriangle, CheckCircle, BarChart3, Wallet, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const AdminHome = () => {
@@ -20,6 +21,18 @@ const AdminHome = () => {
       setData(finRes.data);
       setOutstanding(outRes.data);
     } catch {} finally { setLoading(false); }
+  };
+
+  const downloadExport = async (type) => {
+    try {
+      const res = await axiosInstance.get(`${API}/admin/export/${type}`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = type.includes('csv') ? `report_${Date.now()}.csv` : `report_${Date.now()}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {}
   };
 
   if (loading) {
@@ -50,15 +63,23 @@ const AdminHome = () => {
 
   return (
     <div className="space-y-8" data-testid="admin-financial-overview">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-          Financial Overview
-        </h2>
-        <p className="text-sm text-slate-500 mt-1">Company-wide billing and collection metrics</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
+            Financial Overview
+          </h2>
+          <p className="text-sm text-slate-500 mt-1">Company-wide billing and collection metrics</p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => downloadExport('financial-pdf')}
+            className="border-slate-300 text-xs" data-testid="export-financial-pdf">
+            <Download size={14} className="mr-1" /> PDF Report
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <KPI icon={Users} label="Total Users" value={data?.total_users || 0} sub={`${data?.active_plans || 0} active plans`} color="blue" />
         <KPI icon={DollarSign} label="Total Collected" value={`$${(data?.total_collected || 0).toFixed(2)}`} sub="From deductions" color="green" />
         <KPI icon={AlertTriangle} label="Pending Bills" value={data?.total_pending_bills || 0}
@@ -68,7 +89,7 @@ const AdminHome = () => {
       </div>
 
       {/* Secondary KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
         <KPI icon={Wallet} label="Company Float" value={`$${(data?.company_float || 0).toFixed(2)}`}
           sub="Collected - Paid Out" color="blue" />
         <KPI icon={CheckCircle} label="Bills Paid" value={data?.total_paid_bills || 0}
@@ -149,15 +170,15 @@ const KPI = ({ icon: Icon, label, value, sub, color }) => {
   };
   return (
     <Card className="border-slate-200 shadow-sm" data-testid={`admin-kpi-${label.toLowerCase().replace(/\s/g, '-')}`}>
-      <CardContent className="p-5">
+      <CardContent className="p-4 sm:p-5">
         <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs tracking-wider uppercase font-medium text-slate-400">{label}</p>
-            <p className="text-2xl font-bold text-slate-900 mt-1" style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</p>
-            <p className="text-xs text-slate-500 mt-1">{sub}</p>
+          <div className="min-w-0">
+            <p className="text-[10px] sm:text-xs tracking-wider uppercase font-medium text-slate-400">{label}</p>
+            <p className="text-lg sm:text-2xl font-bold text-slate-900 mt-1 truncate" style={{ fontFamily: 'Outfit, sans-serif' }}>{value}</p>
+            <p className="text-[10px] sm:text-xs text-slate-500 mt-1 truncate">{sub}</p>
           </div>
-          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${colorMap[color]}`}>
-            <Icon size={20} strokeWidth={1.5} />
+          <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${colorMap[color]}`}>
+            <Icon size={18} strokeWidth={1.5} />
           </div>
         </div>
       </CardContent>

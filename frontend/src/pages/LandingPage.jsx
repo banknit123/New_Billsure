@@ -55,7 +55,7 @@ export default function LandingPage() {
       <section className="border-t border-slate-200 bg-white py-16">
         <div className="max-w-6xl mx-auto px-6">
           <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-8">How it works</p>
-          <div className="grid md:grid-cols-4 gap-8">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-8">
             {[
               { icon: CreditCard, title: 'Upload Bills', desc: 'Add your utility, internet, insurance — any recurring bill via upload or OCR scan.' },
               { icon: BarChart3, title: 'Choose a Plan', desc: 'We calculate 3 fixed deduction options: weekly, fortnightly, or monthly — with a safety buffer.' },

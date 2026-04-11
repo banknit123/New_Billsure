@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Routes, Route, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../App';
 import AdminHome from '../components/admin/AdminHome';
 import AdminOutstanding from '../components/admin/AdminOutstanding';
 import AdminCustomers from '../components/admin/AdminCustomers';
-import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut, Menu, X } from 'lucide-react';
 
 const adminNavItems = [
   { to: '/admin', icon: LayoutDashboard, label: 'Financial Overview', end: true },
@@ -15,19 +15,32 @@ const adminNavItems = [
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const closeSidebar = () => setSidebarOpen(false);
 
   return (
     <div className="min-h-screen bg-[#FAFAFA] flex">
-      <aside className="w-60 bg-white border-r border-slate-200 flex flex-col fixed h-full z-20">
-        <div className="px-5 h-16 flex items-center border-b border-slate-200">
+      {sidebarOpen && <div className="fixed inset-0 bg-black/30 z-30 lg:hidden" onClick={closeSidebar} />}
+
+      <aside className={`
+        fixed h-full z-40 bg-white border-r border-slate-200 flex flex-col transition-transform duration-200
+        w-60
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0
+      `}>
+        <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
           <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
             Admin Panel
           </h1>
+          <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 py-4 px-3 space-y-0.5">
           {adminNavItems.map(({ to, icon: Icon, label, end }) => (
-            <NavLink key={to} to={to} end={end}
+            <NavLink key={to} to={to} end={end} onClick={closeSidebar}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -40,7 +53,7 @@ export default function AdminDashboard() {
             </NavLink>
           ))}
 
-          <NavLink to="/dashboard"
+          <NavLink to="/dashboard" onClick={closeSidebar}
             className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-all mt-4"
             data-testid="admin-back-to-dashboard"
           >
@@ -62,11 +75,15 @@ export default function AdminDashboard() {
         </div>
       </aside>
 
-      <main className="ml-60 flex-1 min-h-screen">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center px-8 sticky top-0 z-10">
+      <main className="flex-1 min-h-screen lg:ml-60">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center px-4 sm:px-6 lg:px-8 sticky top-0 z-20">
+          <button className="lg:hidden p-2 rounded-lg hover:bg-slate-100 text-slate-600 mr-3" onClick={() => setSidebarOpen(true)}
+            data-testid="admin-mobile-menu-btn">
+            <Menu size={20} />
+          </button>
           <p className="text-sm font-medium text-slate-900">Company Administration</p>
         </header>
-        <div className="p-8">
+        <div className="p-4 sm:p-6 lg:p-8">
           <Routes>
             <Route index element={<AdminHome />} />
             <Route path="outstanding" element={<AdminOutstanding />} />
