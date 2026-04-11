@@ -1,0 +1,88 @@
+{
+  "theme": "light",
+  "archetype": "4",
+  "archetype_name": "Swiss & High-Contrast",
+  "design_philosophy": "Authoritative, modern, corporate SaaS dashboard emphasizing data clarity and functional beauty. Prioritizes sharp grids, high-contrast monochrome bases with deliberate color accents for financial states. Neutral, analytical, objective.",
+  "colors": {
+    "background": "#FAFAFA",
+    "surface": "#FFFFFF",
+    "border": "#E2E8F0",
+    "primary": "#0F172A",
+    "primary_hover": "#1E293B",
+    "accent": "#2563EB",
+    "accent_hover": "#1D4ED8",
+    "text_main": "#0F172A",
+    "text_muted": "#64748B",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444"
+  },
+  "typography": {
+    "heading_font": "Outfit, sans-serif",
+    "body_font": "Manrope, sans-serif",
+    "scale": {
+      "h1": "text-4xl md:text-5xl tracking-tight font-bold",
+      "h2": "text-2xl md:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl font-semibold",
+      "body": "text-sm md:text-base leading-relaxed",
+      "small": "text-xs tracking-wider uppercase font-medium text-slate-500"
+    }
+  },
+  "layout": {
+    "spacing_scale": "Generous: Use p-6 or p-8 inside cards. Dashboard grid gaps: gap-6.",
+    "dashboard_grid": "Grid-cols-1 md:grid-cols-3 lg:grid-cols-4 for dense data. Span-2 for main charts.",
+    "surface_styles": "Cardless or sharp rectangular edges. 1px solid border (border-slate-200), max 8px rounded corners (rounded-lg). Minimal ambient shadow (shadow-sm).",
+    "alignment": "Left-align dense content. Top-right for card actions."
+  },
+  "motion": {
+    "hover": "Subtle -translate-y-0.5, shadow-md, and border darkening.",
+    "transitions": "transition-all duration-200 ease-in-out",
+    "loading": "Shimmer effects or skeleton loaders for data blocks."
+  },
+  "components": {
+    "navigation": "Sidebar with active states marked by strong left-border or deep background fill. Sticky header with user avatar and quick actions.",
+    "smart_calculator": "Segmented controls for Weekly/Fortnightly/Monthly. Visual progress bar indicating Safety Buffer vs Actual Bill.",
+    "tables": "Shadcn table. No vertical borders, strict horizontal 1px separators. Hover state on rows.",
+    "charts": "Recharts or Shadcn Charts. Use primary and accent colors. Avoid pure green/red unless explicitly indicating profit/loss. For general analytics, use #2563EB and #0F172A.",
+    "buttons": "Primary: Solid #0F172A with white text. Secondary: Outline with transparent bg and slate border. High contrast hover states."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "usage": "Use 1.25rem (20px) icons, stroke-width 1.5. Colors should match text hierarchy. For utility providers, use Lucide icons inside colored circular backgrounds (e.g. bg-blue-100 text-blue-600 for water)."
+  },
+  "media": {
+    "avatars": [
+      {
+        "url": "https://images.unsplash.com/photo-1576533247967-79124db83e48?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHw0fHxjb3Jwb3JhdGUlMjBwcm9mZXNzaW9uYWwlMjBhdmF0YXJ8ZW58MHx8fHwxNzc1ODc1NDM0fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Professional male avatar with blue shirt and gray waistcoat",
+        "category": "user_avatar"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1637589274742-8d4c152720a2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxjb3Jwb3JhdGUlMjBwcm9mZXNzaW9uYWwlMjBhdmF0YXJ8ZW58MHx8fHwxNzc1ODc1NDM0fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Professional male avatar posing in a suit",
+        "category": "user_avatar"
+      }
+    ],
+    "backgrounds": [
+      {
+        "url": "https://images.unsplash.com/photo-1771147445405-153493dca398?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMG1vZGVybiUyMG9mZmljZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc1ODc1NDM0fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Blurred modern office space with lights",
+        "category": "auth_background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1758208974170-3a3037da0c69?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODF8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMG1vZGVybiUyMG9mZmljZSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc1ODc1NDM0fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Bright abstract blue and white space",
+        "category": "hero_background"
+      }
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Prioritize data clarity and information hierarchy over decorative elements. Ensure the Admin and Customer dashboards feel like robust SaaS products.",
+    "Implement the Smart Calculator using a visually engaging component (segmented toggle for Weekly/Fortnightly/Monthly) showing real-time deduction updates and a visual representation of the safety buffer vs actual bill.",
+    "Use Shadcn UI components extensively but heavily customize the styling (remove heavy rounded borders, keep it max rounded-lg, use crisp 1px borders).",
+    "For Admin dashboard, ensure charts (Recharts) follow the color palette (use #2563EB and #0F172A).",
+    "All interactive elements MUST include a `data-testid` attribute in kebab-case (e.g. `data-testid=\"submit-bill-btn\"`).",
+    "Add font links for Outfit (Headings) and Manrope (Body) in the base HTML/CSS.",
+    "Structure the layout with a fixed sidebar (Admin/Customer toggle or routes) and a scrollable main area."
+  ]
+}
