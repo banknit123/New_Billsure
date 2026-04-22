@@ -1,13 +1,17 @@
 # Test Credentials
 
-## Regular User
+## Admin Account
+- Email: admin@billseasypay.com
+- Password: Admin123!
+
+## Customer Account
 - Email: test@billseasypay.com
 - Password: Test123!
 
-## Admin User
-- Email: admin@billseasypay.com
-- Password: Admin123!
-- Note: is_admin=True set in MongoDB directly
-
 ## Stripe
-- Test Key: sk_test_emergent (in backend .env)
+- API Key: sk_test_emergent (test mode)
+- BECS Direct Debit: Not enabled on test key (needs Stripe Dashboard activation for production)
+
+## Encryption
+- Algorithm: Fernet (AES-128-CBC)
+- Key location: /app/backend/.env ENCRYPTION_KEY
