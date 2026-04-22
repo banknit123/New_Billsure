@@ -133,17 +133,24 @@ class Bill(BaseModel):
     category: str  # Electricity, Water, Council, Mobile, Internet, School Fees, Tuition Fees
     provider: str
     account_number: str
-    bpay_code: Optional[str] = None
+    biller_code: Optional[str] = None  # BPAY Biller Code
+    reference_number: Optional[str] = None  # BPAY/Payment Reference Number
+    bpay_code: Optional[str] = None  # Legacy alias for biller_code
     amount: float
     due_date: str  # ISO date string
     frequency: str  # monthly, quarterly, yearly
     status: str = "pending"  # pending, paid, overdue
+    paid_by: Optional[str] = None  # "auto" | "admin" | "customer"
+    paid_at: Optional[str] = None
+    payment_reference: Optional[str] = None  # Admin-entered bank transfer reference
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class BillCreate(BaseModel):
     category: str
     provider: str
     account_number: str
+    biller_code: Optional[str] = None
+    reference_number: Optional[str] = None
     bpay_code: Optional[str] = None
     amount: float
     due_date: str
@@ -784,10 +791,47 @@ def parse_bill_text_server(text: str) -> dict:
             parsed['category'] = category
             break
 
-    # --- BPAY code extraction ---
-    bpay_match = re.search(r'(?:bpay|biller)\s*(?:code|ref)?[:\s]*(\d{4,8})', text, re.IGNORECASE)
-    if bpay_match:
-        parsed['bpay_code'] = bpay_match.group(1)
+    # --- BPAY Biller Code extraction ---
+    biller_code_patterns = [
+        r'(?:biller\s*code|bpay\s*biller\s*code|bpay\s*code)[:\s]*(\d{3,8})',
+        r'biller[:\s]*(\d{4,8})',
+        r'bpay[:\s]*(\d{4,8})',
+    ]
+    for pattern in biller_code_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            parsed['biller_code'] = match.group(1).strip()
+            parsed['bpay_code'] = parsed['biller_code']  # backward compat
+            break
+
+    # --- Reference Number extraction ---
+    # Priority 1: BPAY-specific reference line (e.g., "Ref: 901234567812")
+    bpay_ref_patterns = [
+        r'(?:bpay\s*ref(?:erence)?)[:\s]*([A-Z0-9\-]{4,30})',
+        r'(?:bpay\s*(?:ref\s*)(?:no\.?|number|#))[:\s]*([A-Z0-9\-]{4,30})',
+        r'(?:^|\n)\s*ref[:\s]+(\d{6,20})',
+    ]
+    for pattern in bpay_ref_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            ref_val = match.group(1).strip()
+            if len(ref_val) >= 4:
+                parsed['reference_number'] = ref_val
+                break
+
+    # Priority 2: General reference number (fallback)
+    if not parsed.get('reference_number'):
+        general_ref_patterns = [
+            r'(?:customer\s*ref(?:erence)?|payment\s*ref(?:erence)?|crn|your\s*ref(?:erence)?)[:\s]*([A-Z0-9\-]{4,30})',
+            r'(?:ref(?:erence)?\s*(?:no\.?|number|#))[:\s]*([A-Z0-9\-]{4,30})',
+        ]
+        for pattern in general_ref_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                ref_val = match.group(1).strip()
+                if len(ref_val) >= 4:
+                    parsed['reference_number'] = ref_val
+                    break
 
     # --- Frequency detection ---
     if any(w in text_lower for w in ['quarterly', 'quarter', '3 month', 'every 3']):
@@ -860,6 +904,8 @@ async def extract_bill_data(
                             "category": "Electricity",
                             "provider": accurassi_data.get("retailer", ""),
                             "account_number": accurassi_data.get("accountNumber", ""),
+                            "biller_code": accurassi_data.get("bpayCode", ""),
+                            "reference_number": accurassi_data.get("bpayReference", accurassi_data.get("accountNumber", "")),
                             "amount": accurassi_data.get("totalDue", accurassi_data.get("estimatedAnnualCost", 0)),
                             "due_date": accurassi_data.get("dueDate", ""),
                             "frequency": "quarterly",
@@ -921,6 +967,8 @@ async def extract_bill_data(
                     "category": None,
                     "provider": None,
                     "account_number": None,
+                    "biller_code": None,
+                    "reference_number": None,
                     "amount": None,
                     "due_date": None,
                     "extracted_text": "Image uploaded successfully. Automatic text extraction from images requires the Accurassi API. Please fill in the bill details manually below.",
@@ -1277,6 +1325,8 @@ async def get_bulk_payment_report(
                 "provider": bill["provider"],
                 "category": bill["category"],
                 "account_number": bill["account_number"],
+                "biller_code": bill.get("biller_code") or bill.get("bpay_code"),
+                "reference_number": bill.get("reference_number"),
                 "bpay_code": bill.get("bpay_code"),
                 "amount": bill["amount"],
                 "due_date": bill["due_date"],
@@ -1317,14 +1367,142 @@ async def process_bulk_payment(
     """
     Mark bills as paid in bulk (after admin processes payment to provider)
     """
+    now = datetime.now(timezone.utc).isoformat()
     result = await db.bills.update_many(
         {"id": {"$in": bill_ids}, "provider": provider, "status": "pending"},
-        {"$set": {"status": "paid"}}
+        {"$set": {"status": "paid", "paid_by": "admin", "paid_at": now}}
     )
     
     return {
         "message": f"Bulk payment processed for {provider}",
         "bills_updated": result.modified_count
+    }
+
+
+class AdminPayBillRequest(BaseModel):
+    bill_id: str
+    payment_reference: Optional[str] = None
+
+
+@api_router.post("/admin/pay-bill")
+async def admin_pay_single_bill(data: AdminPayBillRequest, admin_user: dict = Depends(get_admin_user)):
+    """Admin marks a single bill as paid after making BPAY/bank payment on behalf of customer."""
+    bill = await db.bills.find_one({"id": data.bill_id, "status": "pending"}, {"_id": 0})
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found or already paid")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "status": "paid",
+        "paid_by": "admin",
+        "paid_at": now,
+    }
+    if data.payment_reference:
+        update["payment_reference"] = data.payment_reference
+
+    await db.bills.update_one({"id": data.bill_id}, {"$set": update})
+
+    # Deduct from customer wallet
+    await db.users.update_one(
+        {"id": bill["user_id"]},
+        {"$inc": {"wallet_balance": -bill["amount"]}}
+    )
+
+    # Record transaction
+    tx = Transaction(
+        user_id=bill["user_id"],
+        type="bill_payment",
+        amount=bill["amount"],
+        description=f"Admin BPAY payment: {bill['provider']} - Ref: {data.payment_reference or 'N/A'}"
+    )
+    await db.transactions.insert_one(tx.model_dump())
+
+    return {"message": f"Bill paid: {bill['provider']} ${bill['amount']:.2f}", "bill_id": data.bill_id}
+
+
+class AdminBulkPayRequest(BaseModel):
+    bill_ids: List[str]
+    payment_reference: Optional[str] = None
+
+
+@api_router.post("/admin/pay-bills-bulk")
+async def admin_pay_bills_bulk(data: AdminBulkPayRequest, admin_user: dict = Depends(get_admin_user)):
+    """Admin marks multiple bills as paid in bulk after making BPAY/bank payment."""
+    now = datetime.now(timezone.utc).isoformat()
+    paid_count = 0
+    total_amount = 0
+
+    for bill_id in data.bill_ids:
+        bill = await db.bills.find_one({"id": bill_id, "status": "pending"}, {"_id": 0})
+        if not bill:
+            continue
+
+        update = {"status": "paid", "paid_by": "admin", "paid_at": now}
+        if data.payment_reference:
+            update["payment_reference"] = data.payment_reference
+
+        await db.bills.update_one({"id": bill_id}, {"$set": update})
+        await db.users.update_one({"id": bill["user_id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
+
+        tx = Transaction(
+            user_id=bill["user_id"],
+            type="bill_payment",
+            amount=bill["amount"],
+            description=f"Admin bulk BPAY payment: {bill['provider']} - Ref: {data.payment_reference or 'N/A'}"
+        )
+        await db.transactions.insert_one(tx.model_dump())
+        paid_count += 1
+        total_amount += bill["amount"]
+
+    return {"message": f"Bulk payment processed: {paid_count} bills, ${total_amount:.2f}", "paid_count": paid_count, "total_amount": total_amount}
+
+
+@api_router.get("/admin/payment-queue")
+async def admin_payment_queue(admin_user: dict = Depends(get_admin_user)):
+    """
+    Get all pending bills with full payment details for admin to process BPAY/bank payments.
+    Grouped by provider with biller codes and reference numbers.
+    """
+    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+
+    user_ids = list(set(b["user_id"] for b in all_pending))
+    users_list = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password": 0}).to_list(10000)
+    user_map = {u["id"]: u for u in users_list}
+
+    queue = []
+    for bill in all_pending:
+        user = user_map.get(bill["user_id"])
+        queue.append({
+            "bill_id": bill["id"],
+            "user_id": bill["user_id"],
+            "user_name": user["full_name"] if user else "Unknown",
+            "user_email": user["email"] if user else "",
+            "provider": bill["provider"],
+            "category": bill["category"],
+            "account_number": bill["account_number"],
+            "biller_code": bill.get("biller_code") or bill.get("bpay_code") or "",
+            "reference_number": bill.get("reference_number") or "",
+            "amount": bill["amount"],
+            "due_date": bill["due_date"],
+            "frequency": bill["frequency"],
+            "created_at": bill.get("created_at", ""),
+        })
+
+    # Group by provider
+    providers = {}
+    for item in queue:
+        prov = item["provider"]
+        if prov not in providers:
+            providers[prov] = {"provider": prov, "total_amount": 0, "bill_count": 0, "bills": []}
+        providers[prov]["total_amount"] += item["amount"]
+        providers[prov]["bill_count"] += 1
+        providers[prov]["bills"].append(item)
+
+    return {
+        "total_pending": len(queue),
+        "total_amount": sum(b["amount"] for b in queue),
+        "providers": list(providers.values()),
+        "bills": queue,
     }
 
 # ===================== PAYMENT METHODS =====================

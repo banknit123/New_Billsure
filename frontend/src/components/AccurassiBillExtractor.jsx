@@ -25,6 +25,8 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
     category: '',
     provider: '',
     account_number: '',
+    biller_code: '',
+    reference_number: '',
     amount: '',
     due_date: '',
     frequency: 'monthly',
@@ -94,6 +96,8 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
         category: data.category || '',
         provider: data.provider || '',
         account_number: data.account_number || '',
+        biller_code: data.biller_code || '',
+        reference_number: data.reference_number || '',
         amount: data.amount ? String(data.amount) : '',
         due_date: data.due_date || '',
         frequency: data.frequency || 'monthly',
@@ -143,7 +147,7 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
     setPreview(null);
     setExtracted(false);
     setExtractionMethod('');
-    setFormData({ category: '', provider: '', account_number: '', amount: '', due_date: '', frequency: 'monthly', bpay_code: '' });
+    setFormData({ category: '', provider: '', account_number: '', biller_code: '', reference_number: '', amount: '', due_date: '', frequency: 'monthly', bpay_code: '' });
   };
 
   return (
@@ -237,8 +241,9 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
               {formData.provider && <p>Provider: {formData.provider}</p>}
               {formData.amount && <p>Amount: ${formData.amount}</p>}
               {formData.account_number && <p>Account: {formData.account_number}</p>}
+              {formData.biller_code && <p>Biller Code: {formData.biller_code}</p>}
+              {formData.reference_number && <p>Reference: {formData.reference_number}</p>}
               {formData.due_date && <p>Due: {formData.due_date}</p>}
-              {formData.bpay_code && <p>BPAY: {formData.bpay_code}</p>}
             </div>
           </div>
         )}
@@ -321,14 +326,25 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label>BPAY Code (optional)</Label>
-              <Input
-                value={formData.bpay_code}
-                onChange={(e) => handleChange('bpay_code', e.target.value)}
-                placeholder="BPAY biller code"
-                data-testid="extract-bpay-input"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Biller Code</Label>
+                <Input
+                  value={formData.biller_code}
+                  onChange={(e) => handleChange('biller_code', e.target.value)}
+                  placeholder="BPAY Biller Code"
+                  data-testid="extract-biller-code-input"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Reference Number</Label>
+                <Input
+                  value={formData.reference_number}
+                  onChange={(e) => handleChange('reference_number', e.target.value)}
+                  placeholder="BPAY / Payment Ref"
+                  data-testid="extract-reference-number-input"
+                />
+              </div>
             </div>
 
             <div className="flex gap-2 pt-2">

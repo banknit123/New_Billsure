@@ -111,9 +111,10 @@ const BillsManager = ({ user, refreshUser }) => {
                   <tr className="border-b border-slate-200">
                     <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Provider</th>
                     <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Category</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Biller Code</th>
+                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Reference</th>
                     <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Amount</th>
                     <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Due Date</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Frequency</th>
                     <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Status</th>
                     <th className="px-6 py-3"></th>
                   </tr>
@@ -130,9 +131,14 @@ const BillsManager = ({ user, refreshUser }) => {
                           {bill.category}
                         </span>
                       </td>
+                      <td className="px-6 py-4 text-sm text-slate-700 font-mono" data-testid={`bill-biller-code-${bill.id}`}>
+                        {bill.biller_code || bill.bpay_code || <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700 font-mono" data-testid={`bill-reference-${bill.id}`}>
+                        {bill.reference_number || <span className="text-slate-300">—</span>}
+                      </td>
                       <td className="px-6 py-4 text-sm font-semibold text-slate-900">${bill.amount?.toFixed(2)}</td>
                       <td className="px-6 py-4 text-sm text-slate-600">{bill.due_date?.slice(0, 10)}</td>
-                      <td className="px-6 py-4 text-sm text-slate-600 capitalize">{bill.frequency}</td>
                       <td className="px-6 py-4">
                         <span className={`text-xs font-medium px-2 py-1 rounded-md ${
                           bill.status === 'paid' ? 'bg-green-50 text-green-700' :

@@ -4,10 +4,12 @@ import { useAuth } from '../App';
 import AdminHome from '../components/admin/AdminHome';
 import AdminOutstanding from '../components/admin/AdminOutstanding';
 import AdminCustomers from '../components/admin/AdminCustomers';
-import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut, Menu, X } from 'lucide-react';
+import AdminPayments from '../components/admin/AdminPayments';
+import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut, Menu, X, Banknote } from 'lucide-react';
 
 const adminNavItems = [
   { to: '/admin', icon: LayoutDashboard, label: 'Financial Overview', end: true },
+  { to: '/admin/payments', icon: Banknote, label: 'Payment Processing' },
   { to: '/admin/outstanding', icon: FileText, label: 'Outstanding Bills' },
   { to: '/admin/customers', icon: Users, label: 'Customer Analytics' },
 ];
@@ -86,6 +88,7 @@ export default function AdminDashboard() {
         <div className="p-4 sm:p-6 lg:p-8">
           <Routes>
             <Route index element={<AdminHome />} />
+            <Route path="payments" element={<AdminPayments />} />
             <Route path="outstanding" element={<AdminOutstanding />} />
             <Route path="customers" element={<AdminCustomers />} />
           </Routes>

@@ -30,6 +30,8 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
     category: '',
     provider: '',
     account_number: '',
+    biller_code: '',
+    reference_number: '',
     amount: '',
     due_date: '',
     frequency: 'monthly'
@@ -86,6 +88,8 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
         category: data.category || prev.category,
         provider: data.provider || prev.provider,
         account_number: data.account_number || prev.account_number,
+        biller_code: data.biller_code || prev.biller_code,
+        reference_number: data.reference_number || prev.reference_number,
         amount: data.amount ? String(data.amount) : prev.amount,
         due_date: data.due_date || prev.due_date,
         frequency: data.frequency || prev.frequency,
@@ -128,6 +132,8 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
       category: '',
       provider: '',
       account_number: '',
+      biller_code: '',
+      reference_number: '',
       amount: '',
       due_date: '',
       frequency: 'monthly'
@@ -213,6 +219,8 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
                   {formData.provider && <p>Provider: {formData.provider}</p>}
                   {formData.amount && <p>Amount: ${formData.amount}</p>}
                   {formData.account_number && <p>Account: {formData.account_number}</p>}
+                  {formData.biller_code && <p>Biller Code: {formData.biller_code}</p>}
+                  {formData.reference_number && <p>Reference: {formData.reference_number}</p>}
                   {formData.due_date && <p>Due: {formData.due_date}</p>}
                 </div>
               </div>
@@ -250,6 +258,27 @@ const BillUploadDialog = ({ open, onOpenChange, onBillAdded }) => {
                 required
                 data-testid="dialog-account-input"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Biller Code</Label>
+                <Input
+                  value={formData.biller_code}
+                  onChange={(e) => handleChange('biller_code', e.target.value)}
+                  placeholder="BPAY Biller Code"
+                  data-testid="dialog-biller-code-input"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Reference Number</Label>
+                <Input
+                  value={formData.reference_number}
+                  onChange={(e) => handleChange('reference_number', e.target.value)}
+                  placeholder="BPAY / Payment Ref"
+                  data-testid="dialog-reference-number-input"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
