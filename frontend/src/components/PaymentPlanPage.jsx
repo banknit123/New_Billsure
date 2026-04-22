@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import {
   Calculator, Check, Calendar, DollarSign, Shield, ArrowRight, Loader2,
-  CreditCard, Zap, History, ExternalLink, Play
+  CreditCard, Zap, History, ExternalLink, Play, Building2
 } from 'lucide-react';
 
 const PaymentPlanPage = ({ user, refreshUser }) => {
@@ -18,6 +18,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
   const [selecting, setSelecting] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null);
   const [triggering, setTriggering] = useState(false);
+  const [paymentType, setPaymentType] = useState('card'); // 'card' or 'au_becs_debit'
 
   const fetchData = useCallback(async () => {
     try {
@@ -77,11 +78,18 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
       const res = await axiosInstance.post(`${API}/payments/create-checkout`, {
         package_id: packageId,
         origin_url: window.location.origin,
+        payment_method_type: paymentType,
       });
       // Redirect to Stripe
       window.location.href = res.data.url;
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to create checkout');
+      const detail = err.response?.data?.detail || '';
+      if (detail.includes('BECS') && paymentType === 'au_becs_debit') {
+        toast.error('BECS Direct Debit is not yet enabled. Switching to card payment.');
+        setPaymentType('card');
+      } else {
+        toast.error(detail || 'Failed to create checkout');
+      }
       setCheckingOut(null);
     }
   };
@@ -287,6 +295,42 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
             {/* Stripe Top-Up Section */}
             <div className="border-t border-slate-200 pt-5">
               <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-3">Fund Wallet via Stripe</p>
+
+              {/* Payment Method Toggle */}
+              <div className="flex gap-2 mb-4" data-testid="payment-method-toggle">
+                <button
+                  onClick={() => setPaymentType('card')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    paymentType === 'card'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                  data-testid="payment-type-card"
+                >
+                  <CreditCard size={16} />
+                  Card
+                </button>
+                <button
+                  onClick={() => setPaymentType('au_becs_debit')}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    paymentType === 'au_becs_debit'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                  data-testid="payment-type-becs"
+                >
+                  <Building2 size={16} />
+                  Bank (BECS Direct Debit)
+                </button>
+              </div>
+
+              {paymentType === 'au_becs_debit' && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800" data-testid="becs-info-banner">
+                  <p className="font-semibold mb-1">AU BECS Direct Debit</p>
+                  <p>Pay directly from your Australian bank account. BSB and account details are collected securely by Stripe — never stored on our servers. PCI DSS compliant.</p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { id: 'small', label: '$50' },
@@ -302,6 +346,8 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                   >
                     {checkingOut === pkg.id ? (
                       <Loader2 className="animate-spin mr-1" size={14} />
+                    ) : paymentType === 'au_becs_debit' ? (
+                      <Building2 size={14} className="mr-1.5 text-blue-600" />
                     ) : (
                       <CreditCard size={14} className="mr-1.5 text-blue-600" />
                     )}
@@ -311,6 +357,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
               </div>
               <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
                 <ExternalLink size={12} /> Redirects to secure Stripe checkout
+                {paymentType === 'au_becs_debit' && ' (BECS Direct Debit)'}
               </p>
             </div>
           </CardContent>

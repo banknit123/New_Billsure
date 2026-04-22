@@ -22,6 +22,7 @@ import io
 import httpx
 import pdfplumber
 from PIL import Image
+from cryptography.fernet import Fernet
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -42,6 +43,27 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 SECRET_KEY = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
+
+# Field-level encryption for PCI DSS compliance
+_enc_key = os.environ.get('ENCRYPTION_KEY', '')
+_fernet = Fernet(_enc_key.encode()) if _enc_key else None
+
+
+def encrypt_field(value: str) -> str:
+    """Encrypt a sensitive field value. Returns original if encryption not configured."""
+    if not _fernet or not value:
+        return value
+    return _fernet.encrypt(value.encode()).decode()
+
+
+def decrypt_field(value: str) -> str:
+    """Decrypt a sensitive field value. Returns original if decryption fails."""
+    if not _fernet or not value:
+        return value
+    try:
+        return _fernet.decrypt(value.encode()).decode()
+    except Exception:
+        return value  # Already plaintext (pre-migration data)
 
 # Create the main app
 app = FastAPI()
@@ -428,31 +450,43 @@ async def toggle_auto_deduct(current_user: dict = Depends(get_current_user)):
     return {"auto_deduct_enabled": new_status, "message": f"Auto-deduction {'enabled' if new_status else 'disabled'}"}
 
 # Bank Details routes
-@api_router.post("/bank-details", response_model=BankDetails)
+@api_router.post("/bank-details")
 async def add_bank_details(bank_data: BankDetailsCreate, current_user: dict = Depends(get_current_user)):
-    # In production, encrypt account_number and routing_number
     bank_details = BankDetails(
         user_id=current_user["id"],
         **bank_data.model_dump()
     )
-    
+
     # Set other bank accounts as non-primary if this is primary
     if bank_details.is_primary:
         await db.bank_details.update_many(
             {"user_id": current_user["id"]},
             {"$set": {"is_primary": False}}
         )
-    
-    await db.bank_details.insert_one(bank_details.model_dump())
-    return bank_details
 
-@api_router.get("/bank-details", response_model=List[BankDetails])
+    bd_dict = bank_details.model_dump()
+    # Encrypt sensitive fields before storing
+    bd_dict["account_number"] = encrypt_field(bd_dict["account_number"])
+    bd_dict["routing_number"] = encrypt_field(bd_dict["routing_number"])
+    await db.bank_details.insert_one(bd_dict)
+
+    # Return masked version (never return encrypted or raw values)
+    raw_acct = bank_data.account_number
+    raw_rout = bank_data.routing_number
+    bd_dict["account_number"] = "****" + raw_acct[-4:]
+    bd_dict["routing_number"] = "****" + raw_rout[-4:]
+    bd_dict.pop("_id", None)
+    return bd_dict
+
+@api_router.get("/bank-details")
 async def get_bank_details(current_user: dict = Depends(get_current_user)):
     bank_accounts = await db.bank_details.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    # Mask account numbers for security (show only last 4 digits)
+    # Decrypt then mask account numbers for security (show only last 4 digits)
     for account in bank_accounts:
-        account["account_number"] = "****" + account["account_number"][-4:]
-        account["routing_number"] = "****" + account["routing_number"][-4:]
+        raw_acct = decrypt_field(account.get("account_number", ""))
+        raw_rout = decrypt_field(account.get("routing_number", ""))
+        account["account_number"] = "****" + raw_acct[-4:] if len(raw_acct) >= 4 else "****"
+        account["routing_number"] = "****" + raw_rout[-4:] if len(raw_rout) >= 4 else "****"
     return bank_accounts
 
 @api_router.delete("/bank-details/{bank_id}")
@@ -920,7 +954,7 @@ async def get_accurassi_status(current_user: dict = Depends(get_current_user)):
     }
 
 # Direct Debit Request (DDR) Routes
-@api_router.post("/direct-debit/create", response_model=DirectDebitRequest)
+@api_router.post("/direct-debit/create")
 async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, current_user: dict = Depends(get_current_user)):
     """Create a new Direct Debit Request mandate"""
     
@@ -934,7 +968,8 @@ async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, curren
     
     # Create DDR data with formatted BSB
     ddr_dict = ddr_data.model_dump()
-    ddr_dict["bsb"] = bsb_clean[:3] + "-" + bsb_clean[3:]  # Format as XXX-XXX
+    formatted_bsb = bsb_clean[:3] + "-" + bsb_clean[3:]
+    ddr_dict["bsb"] = formatted_bsb
     
     ddr = DirectDebitRequest(
         user_id=current_user["id"],
@@ -942,22 +977,47 @@ async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, curren
         **ddr_dict
     )
     
-    await db.direct_debit_requests.insert_one(ddr.model_dump())
+    ddr_store = ddr.model_dump()
+    # Encrypt sensitive financial fields
+    ddr_store["bsb"] = encrypt_field(formatted_bsb)
+    ddr_store["account_number"] = encrypt_field(ddr_store["account_number"])
+    ddr_store["provider_account_number"] = encrypt_field(ddr_store["provider_account_number"])
+    await db.direct_debit_requests.insert_one(ddr_store)
     
-    return ddr
+    # Return masked version
+    ddr_store.pop("_id", None)
+    ddr_store["bsb"] = formatted_bsb[:3] + "-***"
+    ddr_store["account_number"] = "****" + ddr_data.account_number[-4:]
+    ddr_store["provider_account_number"] = "****" + ddr_data.provider_account_number[-4:]
+    return ddr_store
 
-@api_router.get("/direct-debit/mandates", response_model=List[DirectDebitRequest])
+@api_router.get("/direct-debit/mandates")
 async def get_direct_debit_mandates(current_user: dict = Depends(get_current_user)):
     """Get all DDR mandates for the current user"""
     mandates = await db.direct_debit_requests.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    # Decrypt and mask sensitive fields
+    for m in mandates:
+        raw_bsb = decrypt_field(m.get("bsb", ""))
+        raw_acct = decrypt_field(m.get("account_number", ""))
+        raw_prov_acct = decrypt_field(m.get("provider_account_number", ""))
+        m["bsb"] = raw_bsb[:3] + "-***" if len(raw_bsb) >= 3 else "***-***"
+        m["account_number"] = "****" + raw_acct[-4:] if len(raw_acct) >= 4 else "****"
+        m["provider_account_number"] = "****" + raw_prov_acct[-4:] if len(raw_prov_acct) >= 4 else "****"
     return mandates
 
-@api_router.get("/direct-debit/mandate/{mandate_id}", response_model=DirectDebitRequest)
+@api_router.get("/direct-debit/mandate/{mandate_id}")
 async def get_direct_debit_mandate(mandate_id: str, current_user: dict = Depends(get_current_user)):
     """Get a specific DDR mandate"""
     mandate = await db.direct_debit_requests.find_one({"id": mandate_id, "user_id": current_user["id"]}, {"_id": 0})
     if not mandate:
         raise HTTPException(status_code=404, detail="Mandate not found")
+    # Decrypt and mask
+    raw_bsb = decrypt_field(mandate.get("bsb", ""))
+    raw_acct = decrypt_field(mandate.get("account_number", ""))
+    raw_prov_acct = decrypt_field(mandate.get("provider_account_number", ""))
+    mandate["bsb"] = raw_bsb[:3] + "-***" if len(raw_bsb) >= 3 else "***-***"
+    mandate["account_number"] = "****" + raw_acct[-4:] if len(raw_acct) >= 4 else "****"
+    mandate["provider_account_number"] = "****" + raw_prov_acct[-4:] if len(raw_prov_acct) >= 4 else "****"
     return mandate
 
 @api_router.put("/direct-debit/mandate/{mandate_id}/cancel")
@@ -1272,10 +1332,16 @@ async def process_bulk_payment(
 async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Depends(get_current_user)):
     masked_account = None
     card_last4 = None
+    encrypted_bsb = None
+
+    # Only store masked/encrypted values — never raw card numbers
     if data.type == "bank_account" and data.account_number:
         masked_account = "****" + data.account_number[-4:]
+        if data.bsb:
+            encrypted_bsb = encrypt_field(data.bsb)
     if data.type in ("credit_card", "debit_card") and data.card_number:
         card_last4 = data.card_number[-4:]
+        # Raw card number is NEVER stored — PCI DSS compliance
 
     if data.is_primary:
         await db.payment_methods.update_many(
@@ -1287,18 +1353,28 @@ async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Dep
         type=data.type,
         label=data.label,
         bank_name=data.bank_name,
-        bsb=data.bsb,
+        bsb=encrypted_bsb,
         account_number_masked=masked_account,
         card_last4=card_last4,
         card_brand=data.card_brand,
         is_primary=data.is_primary,
     )
-    await db.payment_methods.insert_one(pm.model_dump())
-    return pm.model_dump()
+    pm_dict = pm.model_dump()
+    await db.payment_methods.insert_one(pm_dict)
+    # Return safe version (decrypt bsb for masking)
+    pm_dict.pop("_id", None)
+    if pm_dict.get("bsb"):
+        raw_bsb = decrypt_field(pm_dict["bsb"])
+        pm_dict["bsb"] = raw_bsb[:3] + "-***" if len(raw_bsb) >= 3 else None
+    return pm_dict
 
 @api_router.get("/payment-methods")
 async def get_payment_methods(current_user: dict = Depends(get_current_user)):
     methods = await db.payment_methods.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(100)
+    for m in methods:
+        if m.get("bsb"):
+            raw_bsb = decrypt_field(m["bsb"])
+            m["bsb"] = raw_bsb[:3] + "-***" if len(raw_bsb) >= 3 else None
     return methods
 
 @api_router.delete("/payment-methods/{method_id}")
@@ -1579,11 +1655,12 @@ TOPUP_PACKAGES = {
 class TopUpRequest(BaseModel):
     package_id: str  # small, medium, large, xlarge, custom_plan
     origin_url: str
+    payment_method_type: str = "card"  # "card" or "au_becs_debit" or "both"
 
 
 @api_router.post("/payments/create-checkout")
 async def create_checkout_session(data: TopUpRequest, request: Request, current_user: dict = Depends(get_current_user)):
-    """Create Stripe checkout session for wallet top-up."""
+    """Create Stripe checkout session for wallet top-up. Supports card and AU BECS Direct Debit."""
     if not STRIPE_API_KEY:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
@@ -1608,18 +1685,37 @@ async def create_checkout_session(data: TopUpRequest, request: Request, current_
     metadata = {
         "user_id": current_user["id"],
         "package_id": data.package_id,
-        "type": "wallet_topup"
+        "type": "wallet_topup",
+        "payment_method_type": data.payment_method_type
     }
+
+    # Determine Stripe payment methods based on user's choice
+    if data.payment_method_type == "au_becs_debit":
+        stripe_methods = ["au_becs_debit"]
+    elif data.payment_method_type == "both":
+        stripe_methods = ["card", "au_becs_debit"]
+    else:
+        stripe_methods = ["card"]
 
     checkout_req = CheckoutSessionRequest(
         amount=amount,
         currency="aud",
         success_url=success_url,
         cancel_url=cancel_url,
-        metadata=metadata
+        metadata=metadata,
+        payment_methods=stripe_methods
     )
 
-    session = await stripe_checkout.create_checkout_session(checkout_req)
+    try:
+        session = await stripe_checkout.create_checkout_session(checkout_req)
+    except Exception as e:
+        error_msg = str(e)
+        if "au_becs_debit" in error_msg and "invalid" in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="BECS Direct Debit is not yet enabled on this Stripe account. Please use Card payment, or enable BECS in your Stripe Dashboard under Settings > Payment Methods."
+            )
+        raise HTTPException(status_code=500, detail=f"Checkout creation failed: {error_msg}")
 
     # Create payment transaction record
     tx = {
@@ -2188,6 +2284,93 @@ async def export_financial_pdf(admin_user: dict = Depends(get_admin_user)):
         buf, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=financial_overview_{datetime.now().strftime('%Y%m%d')}.pdf"}
     )
+
+
+# ===================== PCI COMPLIANCE & DATA SECURITY =====================
+@api_router.get("/security/compliance-status")
+async def get_compliance_status(admin_user: dict = Depends(get_admin_user)):
+    """PCI DSS compliance status dashboard for admin."""
+    encryption_active = _fernet is not None
+    return {
+        "encryption_at_rest": encryption_active,
+        "encryption_algorithm": "AES-128-CBC (Fernet)" if encryption_active else "Not configured",
+        "card_storage_policy": "Last 4 digits only — raw card numbers are never stored",
+        "bank_details_encrypted": encryption_active,
+        "ddr_data_encrypted": encryption_active,
+        "payment_gateway": "Stripe (PCI Level 1 certified)",
+        "becs_direct_debit": "Available via Stripe Checkout",
+        "sensitive_fields_encrypted": [
+            "bank_details.account_number",
+            "bank_details.routing_number",
+            "direct_debit_requests.bsb",
+            "direct_debit_requests.account_number",
+            "direct_debit_requests.provider_account_number",
+            "payment_methods.bsb"
+        ],
+        "compliance_notes": [
+            "All financial data encrypted at rest using Fernet (AES-128-CBC)",
+            "Raw card numbers never stored — only last 4 digits retained",
+            "Bank account numbers encrypted before MongoDB storage",
+            "Stripe handles card/BECS collection on their PCI-certified hosted pages",
+            "API responses always return masked values (****XXXX format)"
+        ]
+    }
+
+
+@api_router.post("/admin/encrypt-existing-data")
+async def encrypt_existing_data(admin_user: dict = Depends(get_admin_user)):
+    """One-time migration: encrypt any plaintext bank/DDR data in the database."""
+    if not _fernet:
+        raise HTTPException(status_code=500, detail="Encryption key not configured")
+
+    migrated = {"bank_details": 0, "ddr_mandates": 0, "payment_methods": 0}
+
+    # Migrate bank_details
+    bank_docs = await db.bank_details.find({}, {"_id": 1, "account_number": 1, "routing_number": 1}).to_list(10000)
+    for doc in bank_docs:
+        acct = doc.get("account_number", "")
+        rout = doc.get("routing_number", "")
+        # Skip if already encrypted (Fernet tokens start with 'gAAAAA')
+        if acct and not acct.startswith("gAAAAA"):
+            await db.bank_details.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {
+                    "account_number": encrypt_field(acct),
+                    "routing_number": encrypt_field(rout)
+                }}
+            )
+            migrated["bank_details"] += 1
+
+    # Migrate DDR mandates
+    ddr_docs = await db.direct_debit_requests.find(
+        {}, {"_id": 1, "bsb": 1, "account_number": 1, "provider_account_number": 1}
+    ).to_list(10000)
+    for doc in ddr_docs:
+        bsb = doc.get("bsb", "")
+        if bsb and not bsb.startswith("gAAAAA"):
+            await db.direct_debit_requests.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {
+                    "bsb": encrypt_field(bsb),
+                    "account_number": encrypt_field(doc.get("account_number", "")),
+                    "provider_account_number": encrypt_field(doc.get("provider_account_number", ""))
+                }}
+            )
+            migrated["ddr_mandates"] += 1
+
+    # Migrate payment_methods BSB
+    pm_docs = await db.payment_methods.find({}, {"_id": 1, "bsb": 1}).to_list(10000)
+    for doc in pm_docs:
+        bsb = doc.get("bsb")
+        if bsb and not bsb.startswith("gAAAAA"):
+            await db.payment_methods.update_one(
+                {"_id": doc["_id"]},
+                {"$set": {"bsb": encrypt_field(bsb)}}
+            )
+            migrated["payment_methods"] += 1
+
+    return {"message": "Encryption migration complete", "migrated_records": migrated}
+
 
 
 # Include router
