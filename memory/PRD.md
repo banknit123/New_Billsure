@@ -1,58 +1,53 @@
 # BillsEasyPay - Product Requirements Document
 
 ## Original Problem Statement
-Build www.billseasypay.com - a utility bill management and payment portal where customers upload bills, choose a fixed deduction plan (weekly/fortnightly/monthly with 8% safety buffer), and the company auto-pays their bills. Features include Stripe payments, auto-deductions, OCR bill extraction, notifications, admin analytics, and report exports.
+Build www.billseasypay.com - a utility bill management and payment portal where customers upload bills, choose a fixed deduction plan (weekly/fortnightly/monthly with 8% safety buffer), and the company auto-pays their bills. Features include Stripe payments, auto-deductions, bill extraction with Biller Code/Reference Number, notifications, admin analytics, admin payment processing, and report exports.
 
 ## Architecture
-- **Frontend**: React.js, TailwindCSS, Shadcn UI (Accordion, Button), Recharts, Lucide-React
+- **Frontend**: React.js, TailwindCSS, Shadcn UI (Accordion, Button, Select), Recharts, Lucide-React
 - **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pdfplumber, reportlab, emergentintegrations (Stripe), cryptography (Fernet)
-- **Payments**: Stripe Checkout via emergentintegrations (Card + BECS Direct Debit ready)
+- **Payments**: Stripe Checkout (Card + BECS Direct Debit ready), Admin BPAY/bank payments
 - **Design**: Swiss corporate theme (Outfit + Manrope fonts), fully mobile-responsive
-- **PDF Extraction**: pdfplumber (pure Python, no system deps) + Accurassi API fallback
+- **PDF Extraction**: pdfplumber (pure Python) + regex for Biller Code, Reference Number, Amount, Due Date, Provider, Account Number
 - **Encryption**: Fernet (AES-128-CBC) field-level encryption for all sensitive financial data
 - **Schedulers**: Auto-deductions (60s), notifications (120s) via asyncio background tasks
 
 ## All Features Implemented
-1. **Landing Page** (NEW) - Hero, animated stats, How It Works (4 steps), Feature showcases (Bill Upload, Smart Plans, Auto-Pay, Payment Methods), Security trust badges, 12-question FAQ accordion, 3 testimonials, CTA banner, rich footer
+1. **Landing Page** - Hero, animated stats, How It Works, Feature showcases, Security badges, 12-Q FAQ, Testimonials, CTA, Footer
 2. Customer Dashboard - Stats, overdue alerts, upcoming/paid bills, plan status
-3. Bill Management - Upload via PDF text extraction / manual entry, table with search/filter
+3. Bill Management - Upload via PDF extraction / manual entry, table with Biller Code + Reference columns
 4. Smart Payment Plan - 3 fixed deduction options with 8% safety buffer
-5. Stripe Payment Gateway - Wallet top-ups via Stripe checkout (Card + BECS option)
+5. Stripe Payment Gateway - Wallet top-ups (Card + BECS option)
 6. Scheduled Auto-Deductions - Background auto-pay for due bills
 7. Payment Methods - CRUD for bank accounts and credit/debit cards
 8. Transaction History - Full audit trail
-9. Notification System - Overdue, upcoming (5-day), low balance alerts with bell UI
+9. Notification System - Overdue, upcoming, low balance alerts
 10. Email Reminders - Simulated (ready for real email service)
 11. Settings - Bank details, DDR mandates, provider connections
 12. Admin Financial Overview - KPIs + Recharts charts with PDF export
-13. Admin Outstanding Bills - Grouped by period with CSV/PDF export
-14. Admin Customer Analytics - Risk levels with CSV export
-15. Mobile Responsive - Collapsible sidebar, responsive grids/tables
-16. PCI DSS Compliance - Fernet encryption at rest, masked API responses, Stripe-hosted payment collection
-17. Admin Compliance Dashboard - /api/security/compliance-status endpoint
-18. Data Migration Tool - /api/admin/encrypt-existing-data for encrypting legacy plaintext data
+13. **Admin Payment Processing** (NEW) - View all pending bills with Biller Code, Reference Number, customer details grouped by provider. Single-pay and bulk-pay with payment reference tracking.
+14. Admin Outstanding Bills - Grouped by period with CSV/PDF export
+15. Admin Customer Analytics - Risk levels with CSV export
+16. Mobile Responsive - Collapsible sidebar, responsive grids/tables
+17. PCI DSS Compliance - Fernet encryption, masked API responses, Stripe-hosted payment
+18. Admin Compliance Dashboard - /api/security/compliance-status
+19. Data Migration Tool - /api/admin/encrypt-existing-data
 
-## Completed (Latest Session)
-- [x] Refactored PDF/bill extraction to pdfplumber (pure Python, no system deps)
-- [x] Fernet encryption at rest for all sensitive financial data (bank details, DDR, payment methods)
-- [x] Stripe BECS Direct Debit option wired
-- [x] PCI compliance status admin endpoint
-- [x] **Complete Landing Page Redesign** - inspired by 1bill.com but with unique content
-  - Hero section with animated floating stat cards
-  - Stats bar with IntersectionObserver-powered counters
-  - "How It Works" 4-step visual walkthrough
-  - Feature sections: Bill Upload, Smart Payment Plans, Auto-Pay, Payment Methods
-  - Security trust section (dark theme) with 4 badges
-  - 12-question FAQ with Shadcn Accordion
-  - 3 customer testimonials with star ratings
-  - CTA banner, professional 4-column footer
-  - Smooth scroll navigation, mobile hamburger menu
+## Bill Model Schema
+- category, provider, account_number, biller_code, reference_number, bpay_code
+- amount, due_date, frequency, status (pending/paid/overdue)
+- paid_by (auto/admin/customer), paid_at, payment_reference
+
+## Key API Endpoints
+- POST /api/bills/extract - Extracts biller_code, reference_number, amount, due_date, provider from PDF
+- GET /api/admin/payment-queue - All pending bills with payment details grouped by provider
+- POST /api/admin/pay-bill - Admin marks single bill as paid (with bank transfer reference)
+- POST /api/admin/pay-bills-bulk - Bulk pay multiple bills
 
 ## Mocked Components
 - Email notifications (simulated to console/DB)
-- Auto-deductions (simulated wallet credit)
-- Accurassi API (PDF extraction fallback, no credentials)
-- BECS Direct Debit (wired but test Stripe key doesn't support it)
+- BECS Direct Debit (test Stripe key doesn't support it - enable in production)
+- Accurassi API (no credentials)
 
 ## P1 - Remaining
 - [ ] Wire up real email service (Resend/SendGrid)
@@ -62,4 +57,4 @@ Build www.billseasypay.com - a utility bill management and payment portal where 
 - [ ] Bill sharing with family/roommates
 - [ ] Payment history timeline view
 - [ ] User profile settings/avatar
-- [ ] Newsletter subscription (backend endpoint + frontend form)
+- [ ] Newsletter subscription endpoint
