@@ -6,10 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { ArrowLeft } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export default function Register() {
   const [form, setForm] = useState({ full_name: '', email: '', password: '', confirm: '' });
   const [loading, setLoading] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
 
@@ -17,6 +19,10 @@ export default function Register() {
     e.preventDefault();
     if (form.password !== form.confirm) {
       toast.error('Passwords do not match');
+      return;
+    }
+    if (!acceptedTerms) {
+      toast.error('Please accept the Terms & Conditions');
       return;
     }
     setLoading(true);
@@ -69,8 +75,23 @@ export default function Register() {
               <Input type="password" value={form.confirm} onChange={set('confirm')} placeholder="Repeat password" required
                 data-testid="register-confirm-input" className="h-11 border-slate-200" />
             </div>
-            <Button type="submit" disabled={loading} data-testid="register-submit-btn"
-              className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-sm font-medium">
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="accept-terms"
+                checked={acceptedTerms}
+                onCheckedChange={setAcceptedTerms}
+                data-testid="register-terms-checkbox"
+                className="mt-0.5"
+              />
+              <label htmlFor="accept-terms" className="text-xs text-slate-500 leading-relaxed cursor-pointer">
+                I agree to the{' '}
+                <Link to="/legal/terms" target="_blank" className="text-blue-600 hover:underline">Terms of Service</Link>
+                {' '}and{' '}
+                <Link to="/legal/privacy" target="_blank" className="text-blue-600 hover:underline">Privacy Policy</Link>
+              </label>
+            </div>
+            <Button type="submit" disabled={loading || !acceptedTerms} data-testid="register-submit-btn"
+              className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-sm font-medium disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Account'}
             </Button>
           </form>

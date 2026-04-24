@@ -668,9 +668,9 @@ export default function LandingPage() {
               &copy; {new Date().getFullYear()} EasyBillsPay. All rights reserved. Australian owned & operated.
             </p>
             <div className="flex gap-4 text-xs text-slate-400">
-              <span className="hover:text-slate-600 cursor-pointer transition-colors">Privacy Policy</span>
-              <span className="hover:text-slate-600 cursor-pointer transition-colors">Terms of Service</span>
-              <span className="hover:text-slate-600 cursor-pointer transition-colors">Security</span>
+              <span onClick={() => navigate('/legal/privacy')} className="hover:text-slate-600 cursor-pointer transition-colors" data-testid="footer-privacy-link">Privacy Policy</span>
+              <span onClick={() => navigate('/legal/terms')} className="hover:text-slate-600 cursor-pointer transition-colors" data-testid="footer-terms-link">Terms of Service</span>
+              <span onClick={() => navigate('/legal/becs')} className="hover:text-slate-600 cursor-pointer transition-colors" data-testid="footer-becs-link">BECS DDR Terms</span>
             </div>
           </div>
         </div>

@@ -8,6 +8,8 @@ import {
   Calculator, Check, Calendar, DollarSign, Shield, ArrowRight, Loader2,
   CreditCard, Zap, History, ExternalLink, Play, Building2
 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Link } from 'react-router-dom';
 
 const PaymentPlanPage = ({ user, refreshUser }) => {
   const [searchParams] = useSearchParams();
@@ -19,6 +21,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
   const [checkingOut, setCheckingOut] = useState(null);
   const [triggering, setTriggering] = useState(false);
   const [paymentType, setPaymentType] = useState('card'); // 'card' or 'au_becs_debit'
+  const [becsAgreed, setBecsAgreed] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -328,6 +331,20 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800" data-testid="becs-info-banner">
                   <p className="font-semibold mb-1">AU BECS Direct Debit</p>
                   <p>Pay directly from your Australian bank account. BSB and account details are collected securely by Stripe — never stored on our servers. PCI DSS compliant.</p>
+                  <div className="flex items-start gap-2 mt-3 pt-3 border-t border-blue-200">
+                    <Checkbox
+                      id="becs-agree"
+                      checked={becsAgreed}
+                      onCheckedChange={setBecsAgreed}
+                      data-testid="becs-agree-checkbox"
+                      className="mt-0.5"
+                    />
+                    <label htmlFor="becs-agree" className="text-xs text-blue-800 leading-relaxed cursor-pointer">
+                      I have read and agree to the{' '}
+                      <Link to="/legal/becs" target="_blank" className="font-semibold underline hover:text-blue-600">BECS Direct Debit Service Agreement</Link>
+                      {' '}and authorise EasyBillsPay to debit my account.
+                    </label>
+                  </div>
                 </div>
               )}
 
@@ -340,7 +357,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                 ].map(pkg => (
                   <Button key={pkg.id} variant="outline" size="sm"
                     onClick={() => handleStripeCheckout(pkg.id)}
-                    disabled={checkingOut === pkg.id}
+                    disabled={checkingOut === pkg.id || (paymentType === 'au_becs_debit' && !becsAgreed)}
                     className="border-slate-300 text-sm h-10 hover:border-blue-400 hover:bg-blue-50"
                     data-testid={`stripe-topup-${pkg.id}`}
                   >

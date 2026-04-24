@@ -7,6 +7,7 @@ import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import LandingPage from './pages/LandingPage';
+import LegalPage from './pages/LegalPage';
 
 export const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
@@ -76,6 +77,7 @@ function App() {
             path="/admin/*"
             element={user?.is_admin ? <AdminDashboard /> : <Navigate to="/login" />}
           />
+          <Route path="/legal/:section" element={<LegalPage />} />
         </Routes>
         <Toaster richColors />
       </BrowserRouter>

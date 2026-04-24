@@ -732,6 +732,102 @@ ACCURASSI_CLIENT_CODE = os.environ.get('ACCURASSI_CLIENT_CODE', '')
 ACCURASSI_CLIENT_ID = os.environ.get('ACCURASSI_CLIENT_ID', '')
 ACCURASSI_BASE_URL = "https://api.accurassi.com/v4"
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@easybillspay.com.au')
+
+# Initialize Resend if key is available
+if RESEND_API_KEY:
+    import resend
+    resend.api_key = RESEND_API_KEY
+
+
+async def send_email(to_email: str, subject: str, html_body: str):
+    """Send an email via Resend. Falls back to logging if not configured."""
+    if not RESEND_API_KEY:
+        logger.info(f"[EMAIL SIM] To: {to_email} | Subject: {subject}")
+        return False
+
+    try:
+        params = {
+            "from": SENDER_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body
+        }
+        await asyncio.to_thread(resend.Emails.send, params)
+        logger.info(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
+        return True
+    except Exception as e:
+        logger.error(f"[EMAIL FAIL] To: {to_email} | Error: {e}")
+        return False
+
+
+def build_bill_email(notification_type: str, user_name: str, bill_provider: str, bill_amount: float, due_date: str, message: str) -> str:
+    """Build styled HTML email for bill notifications."""
+    color = "#DC2626" if notification_type == "overdue" else "#D97706" if notification_type == "upcoming" else "#2563EB"
+    label = "OVERDUE" if notification_type == "overdue" else "DUE SOON" if notification_type == "upcoming" else "NOTICE"
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc; padding: 24px;">
+      <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0;">
+        <div style="background: #0f172a; padding: 20px 24px;">
+          <h1 style="color: white; font-size: 20px; margin: 0;">EasyBillsPay</h1>
+        </div>
+        <div style="padding: 24px;">
+          <div style="display: inline-block; background: {color}15; color: {color}; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">{label}</div>
+          <p style="color: #334155; font-size: 15px; margin: 0 0 8px;">Hi {user_name},</p>
+          <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 20px;">{message}</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 0; color: #94a3b8; font-size: 13px;">Provider</td>
+              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">{bill_provider}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 0; color: #94a3b8; font-size: 13px;">Amount</td>
+              <td style="padding: 10px 0; color: {color}; font-size: 16px; font-weight: 700; text-align: right;">${bill_amount:.2f}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; color: #94a3b8; font-size: 13px;">Due Date</td>
+              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; text-align: right;">{due_date}</td>
+            </tr>
+          </table>
+          <a href="https://www.easybillspay.com.au/dashboard" style="display: block; text-align: center; background: #0f172a; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">View Dashboard</a>
+        </div>
+        <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">EasyBillsPay &middot; www.easybillspay.com.au &middot; Australian Owned</p>
+        </div>
+      </div>
+    </div>"""
+
+
+def build_low_balance_email(user_name: str, wallet: float, pending_total: float) -> str:
+    """Build styled HTML email for low wallet balance."""
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc; padding: 24px;">
+      <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0;">
+        <div style="background: #0f172a; padding: 20px 24px;">
+          <h1 style="color: white; font-size: 20px; margin: 0;">EasyBillsPay</h1>
+        </div>
+        <div style="padding: 24px;">
+          <div style="display: inline-block; background: #D9770615; color: #D97706; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">LOW BALANCE</div>
+          <p style="color: #334155; font-size: 15px; margin: 0 0 8px;">Hi {user_name},</p>
+          <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 20px;">Your wallet balance may not cover your upcoming bills. Please consider topping up to avoid missed payments.</p>
+          <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 10px 0; color: #94a3b8; font-size: 13px;">Wallet Balance</td>
+              <td style="padding: 10px 0; color: #D97706; font-size: 16px; font-weight: 700; text-align: right;">${wallet:.2f}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px 0; color: #94a3b8; font-size: 13px;">Pending Bills Total</td>
+              <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">${pending_total:.2f}</td>
+            </tr>
+          </table>
+          <a href="https://www.easybillspay.com.au/dashboard/payment-plan" style="display: block; text-align: center; background: #2563EB; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">Top Up Wallet</a>
+        </div>
+        <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">EasyBillsPay &middot; www.easybillspay.com.au &middot; Australian Owned</p>
+        </div>
+      </div>
+    </div>"""
 
 
 async def extract_bill_with_vision(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -2393,10 +2489,25 @@ async def generate_notifications():
                             "created_at": now.isoformat(),
                         })
 
-            # Mark notifications as "email sent" (simulated)
+            # Send real emails for unsent notifications
             unsent = await db.notifications.find({"email_sent": False}).to_list(1000)
             for n in unsent:
-                logger.info(f"[EMAIL SIM] To user {n['user_id']}: {n['title']} - {n['message']}")
+                user = await db.users.find_one({"id": n["user_id"]}, {"_id": 0, "email": 1, "full_name": 1})
+                if user:
+                    n_type = n.get("type", "")
+                    if n_type == "low_balance":
+                        total_pend = sum(b.get("amount", 0) for b in await db.bills.find({"user_id": n["user_id"], "status": "pending"}, {"_id": 0}).to_list(100))
+                        html = build_low_balance_email(user.get("full_name", ""), float(n.get("message", "0").split("$")[1].split(")")[0]) if "$" in n.get("message", "") else 0, total_pend)
+                    else:
+                        bill = await db.bills.find_one({"id": n.get("bill_id")}, {"_id": 0}) if n.get("bill_id") else None
+                        html = build_bill_email(
+                            n_type, user.get("full_name", ""),
+                            bill.get("provider", "") if bill else "",
+                            bill.get("amount", 0) if bill else 0,
+                            bill.get("due_date", "") if bill else "",
+                            n.get("message", "")
+                        )
+                    await send_email(user["email"], n.get("title", "EasyBillsPay Notification"), html)
                 await db.notifications.update_one({"id": n["id"]}, {"$set": {"email_sent": True}})
 
         except Exception as e:
