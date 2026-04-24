@@ -23,6 +23,7 @@ import httpx
 import pdfplumber
 from PIL import Image
 from cryptography.fernet import Fernet
+from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionResponse, CheckoutStatusResponse, CheckoutSessionRequest
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -695,6 +696,65 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
 ACCURASSI_CLIENT_CODE = os.environ.get('ACCURASSI_CLIENT_CODE', '')
 ACCURASSI_CLIENT_ID = os.environ.get('ACCURASSI_CLIENT_ID', '')
 ACCURASSI_BASE_URL = "https://api.accurassi.com/v4"
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+
+
+async def extract_bill_with_vision(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    """
+    Use GPT Vision to extract structured bill data from an image.
+    Works for JPEG, PNG, and rendered PDF pages.
+    """
+    if not EMERGENT_LLM_KEY:
+        return None
+
+    b64_img = base64.b64encode(image_bytes).decode('utf-8')
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"bill-extract-{uuid.uuid4().hex[:8]}",
+        system_message="""You are an expert Australian bill data extractor. 
+Extract the following fields from the bill image and return ONLY valid JSON (no markdown, no code fences):
+{
+  "provider": "Company/provider name",
+  "category": "Electricity|Gas|Water|Internet|Mobile|Council|Insurance|Other",
+  "account_number": "The account number (preserve all digits and spaces exactly as shown)",
+  "biller_code": "The BPAY Biller Code (numeric, preserve spaces)",
+  "reference_number": "The BPAY Reference Number (preserve all digits and spaces exactly as shown)",
+  "amount": 0.00,
+  "due_date": "YYYY-MM-DD",
+  "frequency": "monthly|quarterly|yearly"
+}
+Rules:
+- For account_number: Look near labels like "Account Number", "Account No", "Account #", "Acct". Copy the entire number including any spaces.
+- For biller_code: Look near "Biller Code", "BPAY Biller Code", or in the BPAY section. It's usually 4-6 digits.
+- For reference_number: Look near "BPAY Ref", "BPAY Reference", "Ref:", "Reference Number" in the BPAY section. Copy the entire number including any spaces.
+- For amount: Look for "Total Amount Due", "Amount Due", "Total Due", "Pay This Amount", or the largest dollar amount.
+- For due_date: Look for "Due Date", "Pay By", "Payment Due". Convert to YYYY-MM-DD format.
+- If a field is not found, use null.
+- Return ONLY the JSON object, no other text."""
+    )
+    chat.with_model("openai", "gpt-4o")
+
+    image_content = ImageContent(image_base64=b64_img)
+    user_msg = UserMessage(
+        text="Extract all bill payment details from this image. Focus especially on the BPAY section for Biller Code and Reference Number. Preserve all digits and spaces in numbers exactly as they appear.",
+        file_contents=[image_content]
+    )
+
+    try:
+        response = await chat.send_message(user_msg)
+        # Parse JSON from response
+        import json as json_module
+        # Clean up response - remove markdown code fences if present
+        clean = response.strip()
+        if clean.startswith("```"):
+            clean = re.sub(r'^```(?:json)?\s*', '', clean)
+            clean = re.sub(r'\s*```$', '', clean)
+        data = json_module.loads(clean)
+        return data
+    except Exception as e:
+        logger.warning(f"GPT Vision extraction failed: {e}")
+        return None
 
 
 def parse_bill_text_server(text: str) -> dict:
@@ -739,18 +799,22 @@ def parse_bill_text_server(text: str) -> dict:
                 parsed['due_date'] = parsed_date
                 break
 
-    # --- Account number extraction ---
+    # --- Account number extraction (preserve spaces in numbers) ---
     account_patterns = [
-        r'(?:account\s*(?:no\.?|number|#|num))[:\s]*([A-Z0-9\-]{5,20})',
-        r'(?:acct\.?\s*(?:no\.?|#)?)[:\s]*([A-Z0-9\-]{5,20})',
-        r'(?:customer\s*(?:no\.?|number|ref|reference|#))[:\s]*([A-Z0-9\-]{5,20})',
-        r'(?:reference\s*(?:no\.?|number|#)?)[:\s]*([A-Z0-9\-]{5,20})',
+        r'(?:account\s*(?:no\.?|number|#|num))[:\s]*([\d][\d\s\-]{3,25}[\d])',
+        r'(?:acct\.?\s*(?:no\.?|#)?)[:\s]*([\d][\d\s\-]{3,25}[\d])',
+        r'(?:customer\s*(?:no\.?|number|ref|reference|#))[:\s]*([\d][\d\s\-]{3,25}[\d])',
+        r'(?:account\s*(?:no\.?|number|#|num))[:\s]*([A-Z0-9][\w\s\-]{3,25}[\w])',
     ]
     for pattern in account_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            parsed['account_number'] = match.group(1).strip()
-            break
+            val = match.group(1).strip()
+            # Remove trailing non-alphanumeric but keep internal spaces
+            val = re.sub(r'[\s\-]+$', '', val)
+            if len(val) >= 4:
+                parsed['account_number'] = val
+                break
 
     # --- Provider detection ---
     known_providers = {
@@ -793,28 +857,29 @@ def parse_bill_text_server(text: str) -> dict:
 
     # --- BPAY Biller Code extraction ---
     biller_code_patterns = [
+        r'(?:biller\s*code|bpay\s*biller\s*code|bpay\s*code)[:\s]*(\d[\d\s]{2,10}\d)',
         r'(?:biller\s*code|bpay\s*biller\s*code|bpay\s*code)[:\s]*(\d{3,8})',
         r'biller[:\s]*(\d{4,8})',
-        r'bpay[:\s]*(\d{4,8})',
     ]
     for pattern in biller_code_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             parsed['biller_code'] = match.group(1).strip()
-            parsed['bpay_code'] = parsed['biller_code']  # backward compat
+            parsed['bpay_code'] = parsed['biller_code']
             break
 
-    # --- Reference Number extraction ---
-    # Priority 1: BPAY-specific reference line (e.g., "Ref: 901234567812")
+    # --- BPAY Reference Number extraction (preserve spaces in numbers) ---
+    # Priority 1: BPAY-specific reference
     bpay_ref_patterns = [
-        r'(?:bpay\s*ref(?:erence)?)[:\s]*([A-Z0-9\-]{4,30})',
-        r'(?:bpay\s*(?:ref\s*)(?:no\.?|number|#))[:\s]*([A-Z0-9\-]{4,30})',
-        r'(?:^|\n)\s*ref[:\s]+(\d{6,20})',
+        r'(?:bpay\s*ref(?:erence)?\s*(?:no\.?|number|#)?)[:\s]*([\d][\d\s]{3,30}[\d])',
+        r'(?:bpay\s*ref(?:erence)?)[:\s]*([A-Z0-9][\w\s\-]{3,30}[\w])',
+        r'(?:^|\n)\s*ref(?:erence)?\s*(?:no\.?|number|#)?\s*[:\s]\s*([\d][\d\s]{5,30}[\d])',
     ]
     for pattern in bpay_ref_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if match:
             ref_val = match.group(1).strip()
+            ref_val = re.sub(r'[\s\-]+$', '', ref_val)
             if len(ref_val) >= 4:
                 parsed['reference_number'] = ref_val
                 break
@@ -822,13 +887,14 @@ def parse_bill_text_server(text: str) -> dict:
     # Priority 2: General reference number (fallback)
     if not parsed.get('reference_number'):
         general_ref_patterns = [
-            r'(?:customer\s*ref(?:erence)?|payment\s*ref(?:erence)?|crn|your\s*ref(?:erence)?)[:\s]*([A-Z0-9\-]{4,30})',
-            r'(?:ref(?:erence)?\s*(?:no\.?|number|#))[:\s]*([A-Z0-9\-]{4,30})',
+            r'(?:customer\s*ref(?:erence)?|payment\s*ref(?:erence)?|crn|your\s*ref(?:erence)?)[:\s]*([\d][\d\s\-]{3,30}[\d])',
+            r'(?:ref(?:erence)?\s*(?:no\.?|number|#))[:\s]*([\d][\d\s\-]{3,30}[\d])',
         ]
         for pattern in general_ref_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 ref_val = match.group(1).strip()
+                ref_val = re.sub(r'[\s\-]+$', '', ref_val)
                 if len(ref_val) >= 4:
                     parsed['reference_number'] = ref_val
                     break
@@ -871,54 +937,61 @@ async def extract_bill_data(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Extract bill data from an uploaded file (image or PDF).
-    Uses Accurassi API when credentials are available,
-    falls back to pdfplumber (pure Python) for PDFs.
-    Images are opened for validation but require manual entry.
+    Extract bill data from any uploaded file (PDF, JPEG, PNG, etc.).
+    Strategy:
+    1. PDFs: Accurassi API → pdfplumber text → GPT Vision (for scanned PDFs)
+    2. Images: GPT Vision (AI-powered extraction)
+    3. All results go through regex refinement
     """
     file_content = await file.read()
-    file_type = file.content_type or ''
+    file_type = (file.content_type or '').lower()
+    filename = (file.filename or '').lower()
+
+    # Detect file type from extension if content_type is unreliable
+    is_pdf = 'pdf' in file_type or filename.endswith('.pdf')
+    is_image = any(t in file_type for t in ['image', 'jpeg', 'jpg', 'png', 'webp']) or \
+               any(filename.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.tiff'])
 
     extracted_text = ""
     extraction_method = "pdfplumber"
 
     try:
-        # For PDFs: try Accurassi API first if credentials exist
-        if 'pdf' in file_type and ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID:
-            try:
-                b64_content = base64.b64encode(file_content).decode('utf-8')
-                async with httpx.AsyncClient(timeout=30) as http_client:
-                    resp = await http_client.post(
-                        f"{ACCURASSI_BASE_URL}/extraction",
-                        headers={
-                            "clientCode": ACCURASSI_CLIENT_CODE,
-                            "clientID": ACCURASSI_CLIENT_ID,
-                            "Content-Type": "application/json"
-                        },
-                        json={"ebillBase64": b64_content}
-                    )
-                    if resp.status_code == 200:
-                        accurassi_data = resp.json()
-                        extraction_method = "accurassi"
-                        parsed = {
-                            "category": "Electricity",
-                            "provider": accurassi_data.get("retailer", ""),
-                            "account_number": accurassi_data.get("accountNumber", ""),
-                            "biller_code": accurassi_data.get("bpayCode", ""),
-                            "reference_number": accurassi_data.get("bpayReference", accurassi_data.get("accountNumber", "")),
-                            "amount": accurassi_data.get("totalDue", accurassi_data.get("estimatedAnnualCost", 0)),
-                            "due_date": accurassi_data.get("dueDate", ""),
-                            "frequency": "quarterly",
-                            "bpay_code": accurassi_data.get("bpayCode", ""),
-                            "extracted_text": f"Accurassi extraction: annual consumption {accurassi_data.get('estimatedAnnualConsumption', 'N/A')} kWh",
-                            "extraction_method": "accurassi"
-                        }
-                        return parsed
-            except Exception as e:
-                logger.warning(f"Accurassi API call failed, falling back to pdfplumber: {e}")
+        # ===== PATH 1: PDF FILES =====
+        if is_pdf:
+            # Try Accurassi API first if credentials exist
+            if ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID:
+                try:
+                    b64_content = base64.b64encode(file_content).decode('utf-8')
+                    async with httpx.AsyncClient(timeout=30) as http_client:
+                        resp = await http_client.post(
+                            f"{ACCURASSI_BASE_URL}/extraction",
+                            headers={
+                                "clientCode": ACCURASSI_CLIENT_CODE,
+                                "clientID": ACCURASSI_CLIENT_ID,
+                                "Content-Type": "application/json"
+                            },
+                            json={"ebillBase64": b64_content}
+                        )
+                        if resp.status_code == 200:
+                            accurassi_data = resp.json()
+                            parsed = {
+                                "category": "Electricity",
+                                "provider": accurassi_data.get("retailer", ""),
+                                "account_number": accurassi_data.get("accountNumber", ""),
+                                "biller_code": accurassi_data.get("bpayCode", ""),
+                                "reference_number": accurassi_data.get("bpayReference", ""),
+                                "amount": accurassi_data.get("totalDue", accurassi_data.get("estimatedAnnualCost", 0)),
+                                "due_date": accurassi_data.get("dueDate", ""),
+                                "frequency": "quarterly",
+                                "bpay_code": accurassi_data.get("bpayCode", ""),
+                                "extracted_text": f"Accurassi extraction",
+                                "extraction_method": "accurassi"
+                            }
+                            return parsed
+                except Exception as e:
+                    logger.warning(f"Accurassi API failed, falling back: {e}")
 
-        # Pure Python PDF text extraction using pdfplumber
-        if 'pdf' in file_type:
+            # Try pdfplumber text extraction
             try:
                 with pdfplumber.open(io.BytesIO(file_content)) as pdf:
                     texts = []
@@ -928,61 +1001,90 @@ async def extract_bill_data(
                             texts.append(page_text)
                     extracted_text = '\n'.join(texts)
             except Exception as e:
-                logger.warning(f"pdfplumber extraction failed: {e}")
-                # Fallback: try pypdfium2
-                try:
-                    import pypdfium2 as pdfium
-                    pdf_doc = pdfium.PdfDocument(file_content)
-                    texts = []
-                    for page in pdf_doc:
-                        textpage = page.get_textpage()
-                        page_text = textpage.get_text_range()
-                        if page_text:
-                            texts.append(page_text)
-                        textpage.close()
-                        page.close()
+                logger.warning(f"pdfplumber failed: {e}")
+
+            # If pdfplumber got good text, use regex extraction
+            if extracted_text and len(extracted_text.strip()) >= 20:
+                parsed = parse_bill_text_server(extracted_text)
+                parsed['extracted_text'] = extracted_text[:2000]
+                parsed['extraction_method'] = 'pdfplumber'
+                return parsed
+
+            # Scanned/image-based PDF → render to image and use GPT Vision
+            logger.info("PDF has no extractable text, trying GPT Vision...")
+            try:
+                import pypdfium2 as pdfium
+                pdf_doc = pdfium.PdfDocument(file_content)
+                if len(pdf_doc) > 0:
+                    page = pdf_doc[0]
+                    bitmap = page.render(scale=2)
+                    pil_image = bitmap.to_pil()
+                    img_buffer = io.BytesIO()
+                    pil_image.save(img_buffer, format='JPEG', quality=85)
+                    img_bytes = img_buffer.getvalue()
+                    page.close()
                     pdf_doc.close()
-                    extracted_text = '\n'.join(texts)
-                    extraction_method = "pypdfium2"
-                except Exception as e2:
-                    logger.error(f"pypdfium2 fallback also failed: {e2}")
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Could not extract text from this PDF. It may be a scanned/image-only PDF. Please enter bill details manually."
-                    )
 
-            if not extracted_text or len(extracted_text.strip()) < 10:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No readable text found in PDF. This may be a scanned document. Please enter bill details manually."
-                )
+                    vision_result = await extract_bill_with_vision(img_bytes, "image/jpeg")
+                    if vision_result:
+                        vision_result['extraction_method'] = 'ai_vision'
+                        vision_result['extracted_text'] = 'Extracted via AI Vision (scanned PDF)'
+                        # Ensure all expected fields exist
+                        for field in ['category', 'provider', 'account_number', 'biller_code', 'reference_number', 'amount', 'due_date', 'frequency']:
+                            if field not in vision_result:
+                                vision_result[field] = None
+                        return vision_result
+            except Exception as e:
+                logger.warning(f"pypdfium2/vision fallback failed: {e}")
 
-        else:
-            # Image files (JPG, PNG): validate the image but inform user
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract text from this PDF. Please try a clearer scan or enter details manually."
+            )
+
+        # ===== PATH 2: IMAGE FILES (JPEG, PNG, etc.) =====
+        elif is_image:
+            # Validate image first
             try:
                 img = Image.open(io.BytesIO(file_content))
                 img.verify()
-                extraction_method = "manual"
-                return {
-                    "category": None,
-                    "provider": None,
-                    "account_number": None,
-                    "biller_code": None,
-                    "reference_number": None,
-                    "amount": None,
-                    "due_date": None,
-                    "extracted_text": "Image uploaded successfully. Automatic text extraction from images requires the Accurassi API. Please fill in the bill details manually below.",
-                    "extraction_method": "manual",
-                    "requires_manual_entry": True
-                }
             except Exception:
-                raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid JPG, PNG, or PDF.")
+                raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid JPEG, PNG, or PDF.")
 
-        parsed = parse_bill_text_server(extracted_text)
-        parsed['extracted_text'] = extracted_text[:2000]
-        parsed['extraction_method'] = extraction_method
+            # Re-open image (verify() invalidates the object) and convert to JPEG for consistent processing
+            img = Image.open(io.BytesIO(file_content))
+            if img.mode in ('RGBA', 'P', 'LA'):
+                img = img.convert('RGB')
+            img_buffer = io.BytesIO()
+            img.save(img_buffer, format='JPEG', quality=85)
+            img_bytes = img_buffer.getvalue()
 
-        return parsed
+            # Use GPT Vision to extract bill data from image
+            vision_result = await extract_bill_with_vision(img_bytes, "image/jpeg")
+            if vision_result:
+                vision_result['extraction_method'] = 'ai_vision'
+                vision_result['extracted_text'] = 'Extracted via AI Vision'
+                for field in ['category', 'provider', 'account_number', 'biller_code', 'reference_number', 'amount', 'due_date', 'frequency']:
+                    if field not in vision_result:
+                        vision_result[field] = None
+                return vision_result
+
+            # GPT Vision unavailable — return manual entry prompt
+            return {
+                "category": None,
+                "provider": None,
+                "account_number": None,
+                "biller_code": None,
+                "reference_number": None,
+                "amount": None,
+                "due_date": None,
+                "extracted_text": "Image uploaded but AI extraction unavailable. Please fill in the bill details manually.",
+                "extraction_method": "manual",
+                "requires_manual_entry": True
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type. Please upload a PDF, JPEG, or PNG file.")
 
     except HTTPException:
         raise
@@ -993,12 +1095,17 @@ async def extract_bill_data(
 
 @api_router.get("/accurassi/status")
 async def get_accurassi_status(current_user: dict = Depends(get_current_user)):
-    """Check Accurassi API integration status"""
-    has_credentials = bool(ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID)
+    """Check extraction integration status"""
+    has_accurassi = bool(ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID)
+    has_vision = bool(EMERGENT_LLM_KEY)
     return {
-        "configured": has_credentials,
-        "ocr_available": True,
-        "message": "Accurassi API connected" if has_credentials else "Using PDF text extraction (configure Accurassi credentials for enhanced image and scanned PDF extraction)"
+        "configured": has_accurassi,
+        "ocr_available": has_vision,
+        "message": (
+            "Accurassi API connected" if has_accurassi
+            else "AI Vision enabled for images + PDF text extraction" if has_vision
+            else "PDF text extraction only"
+        )
     }
 
 # Direct Debit Request (DDR) Routes

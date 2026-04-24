@@ -161,7 +161,7 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
             <CardTitle>Smart Bill Extraction</CardTitle>
             <CardDescription>
               Upload a bill image or PDF to automatically extract details
-              {apiStatus?.configured ? ' (Accurassi API)' : ' (PDF Text Extraction)'}
+              {apiStatus?.configured ? ' (Accurassi API)' : apiStatus?.ocr_available ? ' (AI Vision + PDF)' : ' (PDF Only)'}
             </CardDescription>
           </div>
         </div>
@@ -232,6 +232,8 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
               <span className="font-semibold text-green-900">
                 {extractionMethod === 'manual'
                   ? 'Image Uploaded — Enter Details Below'
+                  : extractionMethod === 'ai_vision'
+                  ? 'AI Vision — Details Extracted'
                   : `Details Extracted via ${extractionMethod === 'accurassi' ? 'Accurassi API' : 'PDF Text Extraction'}`
                 }
               </span>
