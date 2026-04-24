@@ -3,16 +3,19 @@ import { axiosInstance, API } from '../App';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { FileText, DollarSign, Clock, CheckCircle, AlertTriangle, ArrowRight, TrendingUp } from 'lucide-react';
+import { FileText, DollarSign, Clock, CheckCircle, AlertTriangle, ArrowRight, TrendingUp, TrendingDown, Minus, Sparkles, Loader2 } from 'lucide-react';
 
 const DashboardHome = ({ user, refreshUser }) => {
   const [bills, setBills] = useState([]);
   const [plan, setPlan] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState(null);
+  const [insightsLoading, setInsightsLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchData();
+    fetchInsights();
   }, []);
 
   const fetchData = async () => {
@@ -25,6 +28,15 @@ const DashboardHome = ({ user, refreshUser }) => {
       setPlan(planRes.data.status === 'none' ? null : planRes.data);
     } catch {} finally {
       setLoading(false);
+    }
+  };
+
+  const fetchInsights = async () => {
+    try {
+      const res = await axiosInstance.get(`${API}/insights/analyze`);
+      setInsights(res.data);
+    } catch {} finally {
+      setInsightsLoading(false);
     }
   };
 
@@ -93,6 +105,85 @@ const DashboardHome = ({ user, refreshUser }) => {
               {plan ? 'Manage Plan' : 'Set Up Plan'} <ArrowRight className="ml-2" size={16} />
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Insights Preview */}
+      <Card className="border-slate-200 shadow-sm overflow-hidden" data-testid="insights-preview">
+        <CardContent className="p-0">
+          <div className="p-5 pb-0 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                <Sparkles size={16} className="text-blue-600" />
+              </div>
+              <div>
+                <p className="text-xs tracking-widest uppercase font-medium text-slate-400">Bill Intelligence</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard/insights')}
+              className="text-blue-600 text-xs" data-testid="go-to-insights-btn">
+              View All <ArrowRight size={14} className="ml-1" />
+            </Button>
+          </div>
+          {insightsLoading ? (
+            <div className="p-5 flex items-center gap-2 text-slate-400">
+              <Loader2 size={14} className="animate-spin" />
+              <span className="text-sm">Analysing your bills...</span>
+            </div>
+          ) : insights?.analytics ? (
+            <div className="p-5">
+              {/* Quick trend + summary */}
+              <div className="flex items-center gap-3 mb-3">
+                {insights.analytics.trend_direction === 'increasing' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-full">
+                    <TrendingUp size={12} /> Spending increasing
+                  </span>
+                )}
+                {insights.analytics.trend_direction === 'decreasing' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded-full">
+                    <TrendingDown size={12} /> Spending decreasing
+                  </span>
+                )}
+                {insights.analytics.trend_direction === 'stable' && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                    <Minus size={12} /> Spending stable
+                  </span>
+                )}
+                <span className="text-xs text-slate-400">
+                  {insights.analytics.category_insights.length} categories &middot; ${insights.analytics.total_spend.toFixed(2)} total
+                </span>
+              </div>
+
+              {/* AI summary text */}
+              {insights.ai_insights?.summary && (
+                <p className="text-sm text-slate-600 leading-relaxed mb-3" data-testid="dashboard-ai-summary">
+                  {insights.ai_insights.summary}
+                </p>
+              )}
+
+              {/* Top 2 highlights */}
+              {insights.ai_insights?.highlights?.slice(0, 2).map((h, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs text-slate-500 mt-2" data-testid={`dashboard-highlight-${i}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${
+                    h.type === 'increasing' ? 'bg-red-400' : h.type === 'decreasing' ? 'bg-green-400' : h.type === 'warning' ? 'bg-amber-400' : 'bg-blue-400'
+                  }`} />
+                  <span><strong>{h.title}:</strong> {h.description}</span>
+                </div>
+              ))}
+
+              {/* Top saving tip */}
+              {insights.ai_insights?.savings_tips?.[0] && (
+                <div className="mt-3 pt-3 border-t border-slate-100 flex items-start gap-2 text-xs" data-testid="dashboard-top-tip">
+                  <span className="text-emerald-500 font-bold">TIP</span>
+                  <span className="text-slate-600">{insights.ai_insights.savings_tips[0].tip}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="p-5 text-sm text-slate-400">
+              Upload bills to unlock AI-powered insights
+            </div>
+          )}
         </CardContent>
       </Card>
 

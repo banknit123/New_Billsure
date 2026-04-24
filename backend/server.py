@@ -2804,6 +2804,234 @@ async def encrypt_existing_data(admin_user: dict = Depends(get_admin_user)):
 
 
 
+# ========== AI BILL INTELLIGENCE ==========
+
+UTILITY_BENCHMARKS = {
+    "Electricity": {"avg_monthly": 150, "avg_quarterly": 450, "low": 80, "high": 300, "unit": "quarter"},
+    "Gas": {"avg_monthly": 80, "avg_quarterly": 240, "low": 40, "high": 200, "unit": "quarter"},
+    "Water": {"avg_monthly": 60, "avg_quarterly": 180, "low": 30, "high": 150, "unit": "quarter"},
+    "Internet": {"avg_monthly": 75, "avg_quarterly": 225, "low": 50, "high": 120, "unit": "month"},
+    "Mobile": {"avg_monthly": 50, "avg_quarterly": 150, "low": 20, "high": 80, "unit": "month"},
+    "Council": {"avg_monthly": 150, "avg_quarterly": 450, "low": 100, "high": 500, "unit": "quarter"},
+    "Insurance": {"avg_monthly": 120, "avg_quarterly": 360, "low": 60, "high": 300, "unit": "quarter"},
+    "Other": {"avg_monthly": 100, "avg_quarterly": 300, "low": 30, "high": 250, "unit": "month"},
+}
+
+
+def compute_bill_analytics(bills: list) -> dict:
+    """Compute spending analytics from user bills without AI."""
+    now = datetime.now(timezone.utc)
+
+    category_spend = {}
+    provider_spend = {}
+    monthly_spend = {}
+    total_spend = 0
+    bill_count = len(bills)
+
+    for b in bills:
+        amt = b.get("amount", 0) or 0
+        cat = b.get("category", "Other")
+        prov = b.get("provider", "Unknown")
+        total_spend += amt
+
+        # Category aggregation
+        if cat not in category_spend:
+            category_spend[cat] = {"total": 0, "count": 0, "bills": []}
+        category_spend[cat]["total"] += amt
+        category_spend[cat]["count"] += 1
+        category_spend[cat]["bills"].append(b)
+
+        # Provider aggregation
+        key = f"{cat}::{prov}"
+        if key not in provider_spend:
+            provider_spend[key] = {"category": cat, "provider": prov, "total": 0, "count": 0}
+        provider_spend[key]["total"] += amt
+        provider_spend[key]["count"] += 1
+
+        # Monthly trend
+        created = b.get("created_at", "") or b.get("due_date", "")
+        if created:
+            month_key = created[:7]  # YYYY-MM
+            if month_key not in monthly_spend:
+                monthly_spend[month_key] = 0
+            monthly_spend[month_key] += amt
+
+    # Sort months
+    sorted_months = sorted(monthly_spend.keys())
+    monthly_trend = [{"month": m, "amount": round(monthly_spend[m], 2)} for m in sorted_months]
+
+    # Detect category trends
+    category_insights = []
+    for cat, data in category_spend.items():
+        avg_per_bill = data["total"] / data["count"] if data["count"] > 0 else 0
+        benchmark = UTILITY_BENCHMARKS.get(cat, UTILITY_BENCHMARKS["Other"])
+
+        # Compare to benchmark
+        benchmark_avg = benchmark["avg_quarterly"] if benchmark["unit"] == "quarter" else benchmark["avg_monthly"]
+        status = "normal"
+        if avg_per_bill > benchmark["high"]:
+            status = "high"
+        elif avg_per_bill < benchmark["low"]:
+            status = "low"
+
+        category_insights.append({
+            "category": cat,
+            "total_spent": round(data["total"], 2),
+            "bill_count": data["count"],
+            "avg_per_bill": round(avg_per_bill, 2),
+            "benchmark_avg": benchmark_avg,
+            "benchmark_low": benchmark["low"],
+            "benchmark_high": benchmark["high"],
+            "status": status,
+        })
+
+    # Provider comparison within categories
+    provider_comparison = []
+    cats_with_providers = {}
+    for key, data in provider_spend.items():
+        cat = data["category"]
+        if cat not in cats_with_providers:
+            cats_with_providers[cat] = []
+        cats_with_providers[cat].append(data)
+
+    for cat, providers in cats_with_providers.items():
+        if len(providers) >= 1:
+            sorted_provs = sorted(providers, key=lambda x: x["total"] / x["count"])
+            provider_comparison.append({
+                "category": cat,
+                "providers": [
+                    {
+                        "name": p["provider"],
+                        "avg_cost": round(p["total"] / p["count"], 2),
+                        "total": round(p["total"], 2),
+                        "bill_count": p["count"],
+                    }
+                    for p in sorted_provs
+                ],
+            })
+
+    # Overall trend direction
+    trend_direction = "stable"
+    if len(sorted_months) >= 2:
+        recent = monthly_spend.get(sorted_months[-1], 0)
+        prev = monthly_spend.get(sorted_months[-2], 0)
+        if prev > 0:
+            change_pct = ((recent - prev) / prev) * 100
+            if change_pct > 10:
+                trend_direction = "increasing"
+            elif change_pct < -10:
+                trend_direction = "decreasing"
+
+    return {
+        "total_spend": round(total_spend, 2),
+        "bill_count": bill_count,
+        "category_insights": category_insights,
+        "provider_comparison": provider_comparison,
+        "monthly_trend": monthly_trend,
+        "trend_direction": trend_direction,
+    }
+
+
+@api_router.get("/insights/analyze")
+async def get_bill_insights(user=Depends(get_current_user)):
+    """AI-powered bill intelligence - spending analysis, trends, and savings suggestions."""
+    bills_cursor = db.bills.find({"user_id": user["id"]}, {"_id": 0})
+    bills = await bills_cursor.to_list(500)
+
+    if not bills:
+        return {
+            "analytics": None,
+            "ai_insights": None,
+            "message": "No bills found. Upload some bills to get personalized insights."
+        }
+
+    analytics = compute_bill_analytics(bills)
+
+    # Generate AI insights if LLM key is available
+    ai_insights = None
+    if EMERGENT_LLM_KEY:
+        try:
+            # Build a concise summary for GPT
+            summary_lines = [
+                f"User has {analytics['bill_count']} bills totalling ${analytics['total_spend']:.2f}.",
+                f"Overall spending trend: {analytics['trend_direction']}.",
+                "Category breakdown:"
+            ]
+            for ci in analytics["category_insights"]:
+                comparison = ""
+                if ci["status"] == "high":
+                    comparison = f" (ABOVE avg benchmark of ${ci['benchmark_avg']})"
+                elif ci["status"] == "low":
+                    comparison = f" (below avg benchmark of ${ci['benchmark_avg']})"
+                summary_lines.append(
+                    f"- {ci['category']}: ${ci['total_spent']} across {ci['bill_count']} bills, avg ${ci['avg_per_bill']}/bill{comparison}"
+                )
+
+            if analytics["provider_comparison"]:
+                summary_lines.append("Providers by category:")
+                for pc in analytics["provider_comparison"]:
+                    provs = ", ".join([f"{p['name']} (avg ${p['avg_cost']})" for p in pc["providers"]])
+                    summary_lines.append(f"- {pc['category']}: {provs}")
+
+            if analytics["monthly_trend"]:
+                recent_months = analytics["monthly_trend"][-6:]
+                summary_lines.append("Monthly spend (last 6 months):")
+                for mt in recent_months:
+                    summary_lines.append(f"- {mt['month']}: ${mt['amount']}")
+
+            data_summary = "\n".join(summary_lines)
+
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"insights-{user['id']}-{uuid.uuid4().hex[:6]}",
+                system_message="""You are a friendly Australian financial advisor specialising in household utility bills.
+Analyse the user's bill data and provide practical, actionable insights.
+Return ONLY valid JSON (no markdown, no code fences) with this structure:
+{
+  "summary": "A 2-3 sentence overview of their spending patterns",
+  "highlights": [
+    {"type": "increasing|decreasing|stable|warning|saving", "title": "Short title", "description": "1-2 sentence detail", "category": "category_name or null"}
+  ],
+  "savings_tips": [
+    {"tip": "Actionable tip text", "potential_saving": "$X/month or $X/year", "category": "category_name or General", "priority": "high|medium|low"}
+  ],
+  "provider_insights": [
+    {"category": "category_name", "insight": "Comparison insight or suggestion"}
+  ],
+  "seasonal_note": "Any seasonal pattern observation or null"
+}
+Rules:
+- Give 3-5 highlights covering trends, anomalies, and positive patterns
+- Give 3-5 savings tips ranked by potential impact, specific to Australian utility market
+- Reference actual providers and amounts from the data where relevant
+- Be encouraging and practical, not alarming
+- Mention Australian-specific programs like energy rebates, concession cards, GreenPower
+- If spending is below benchmarks, acknowledge that positively
+- All dollar amounts in AUD"""
+            )
+            chat.with_model("openai", "gpt-4o")
+
+            response = await chat.send_message(
+                UserMessage(text=f"Analyse this Australian household's bill data and provide insights:\n\n{data_summary}")
+            )
+
+            clean = response.strip()
+            if clean.startswith("```"):
+                clean = re.sub(r'^```(?:json)?\s*', '', clean)
+                clean = re.sub(r'\s*```$', '', clean)
+
+            import json as json_mod
+            ai_insights = json_mod.loads(clean)
+        except Exception as e:
+            logger.warning(f"AI insights generation failed: {e}")
+            ai_insights = None
+
+    return {
+        "analytics": analytics,
+        "ai_insights": ai_insights,
+    }
+
+
 # Include router
 app.include_router(api_router)
 

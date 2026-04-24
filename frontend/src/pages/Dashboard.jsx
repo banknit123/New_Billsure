@@ -6,12 +6,14 @@ import BillsManager from '../components/BillsManager';
 import PaymentPlanPage from '../components/PaymentPlanPage';
 import PaymentMethodsManager from '../components/PaymentMethodsManager';
 import SettingsPage from '../components/SettingsPage';
+import BillIntelligence from '../components/BillIntelligence';
 import NotificationBell from '../components/NotificationBell';
-import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Shield, Menu, X } from 'lucide-react';
+import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Shield, Menu, X, Sparkles } from 'lucide-react';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Overview', end: true },
   { to: '/dashboard/bills', icon: FileText, label: 'Bills' },
+  { to: '/dashboard/insights', icon: Sparkles, label: 'Bill Intelligence' },
   { to: '/dashboard/payment-plan', icon: Calculator, label: 'Payment Plan' },
   { to: '/dashboard/payment-methods', icon: CreditCard, label: 'Payment Methods' },
   { to: '/dashboard/settings', icon: Settings, label: 'Settings' },
@@ -118,6 +120,7 @@ export default function Dashboard() {
           <Routes>
             <Route index element={<DashboardHome user={user} refreshUser={refreshUser} />} />
             <Route path="bills" element={<BillsManager user={user} refreshUser={refreshUser} />} />
+            <Route path="insights" element={<BillIntelligence />} />
             <Route path="payment-plan" element={<PaymentPlanPage user={user} refreshUser={refreshUser} />} />
             <Route path="payment-methods" element={<PaymentMethodsManager user={user} refreshUser={refreshUser} />} />
             <Route path="settings" element={<SettingsPage user={user} refreshUser={refreshUser} />} />
