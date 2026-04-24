@@ -85,9 +85,9 @@ export default function Register() {
               />
               <label htmlFor="accept-terms" className="text-xs text-slate-500 leading-relaxed cursor-pointer">
                 I agree to the{' '}
-                <Link to="/legal/terms" target="_blank" className="text-blue-600 hover:underline">Terms of Service</Link>
+                <Link to="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Terms of Service</Link>
                 {' '}and{' '}
-                <Link to="/legal/privacy" target="_blank" className="text-blue-600 hover:underline">Privacy Policy</Link>
+                <Link to="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Privacy Policy</Link>
               </label>
             </div>
             <Button type="submit" disabled={loading || !acceptedTerms} data-testid="register-submit-btn"

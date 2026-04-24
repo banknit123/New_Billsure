@@ -22,3 +22,13 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 8. Admin Analytics - Financial overview, outstanding, customers
 9. PCI DSS Compliance - Encryption at rest
 10. Mobile Responsive
+11. Legal Pages - Privacy Policy, Terms of Service, BECS DDR Service Agreement (routed at /legal/privacy, /legal/terms, /legal/becs)
+12. Compliance Checkboxes - T&C acceptance on Registration, BECS DDR agreement on Payment Plan
+13. Resend Email Integration - With graceful fallback if API key missing
+14. Security Headers, Rate Limiting, CORS, JWT 4hr expiry
+
+## Pending / Backlog
+- P1: Refactor server.py (~2800 lines) into routes/, models/, utils/ modules
+- P1: Collect Resend API Key from user for live email delivery
+- P1: Collect Accurassi API Key from user for live bill sync
+- P2: Real Accurassi integration once key is provided
