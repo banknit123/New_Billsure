@@ -69,7 +69,7 @@ export default function Login() {
       <div className="hidden lg:block lg:w-[45%] bg-slate-900 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900" />
         <div className="relative z-10 h-full flex flex-col justify-center px-16">
-          <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">BillsEasyPay</p>
+          <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">EasyBillsPay</p>
           <h2 className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'Outfit, sans-serif' }}>
             One fixed payment covers all your bills
           </h2>

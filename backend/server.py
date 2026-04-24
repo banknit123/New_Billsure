@@ -2477,7 +2477,7 @@ async def export_outstanding_pdf(admin_user: dict = Depends(get_admin_user)):
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
 
     elements = []
-    elements.append(Paragraph("BillsEasyPay - Outstanding Bills Report", title_style))
+    elements.append(Paragraph("EasyBillsPay - Outstanding Bills Report", title_style))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
 
     total = sum(b.get("amount", 0) for b in all_pending)
@@ -2537,7 +2537,7 @@ async def export_financial_pdf(admin_user: dict = Depends(get_admin_user)):
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
 
     elements = []
-    elements.append(Paragraph("BillsEasyPay - Financial Overview Report", title_style))
+    elements.append(Paragraph("EasyBillsPay - Financial Overview Report", title_style))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
 
     # KPI Table

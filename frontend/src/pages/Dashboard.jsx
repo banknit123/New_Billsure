@@ -45,7 +45,7 @@ export default function Dashboard() {
       `}>
         <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
           <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            BillsEasyPay
+            EasyBillsPay
           </h1>
           <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
             <X size={20} />
