@@ -2932,6 +2932,11 @@ def compute_bill_analytics(bills: list) -> dict:
     }
 
 
+# Simple in-memory cache for AI insights (15 min TTL)
+_insights_cache: Dict[str, dict] = {}
+_INSIGHTS_TTL = 900  # 15 minutes
+
+
 @api_router.get("/insights/analyze")
 async def get_bill_insights(user=Depends(get_current_user)):
     """AI-powered bill intelligence - spending analysis, trends, and savings suggestions."""
@@ -2947,9 +2952,16 @@ async def get_bill_insights(user=Depends(get_current_user)):
 
     analytics = compute_bill_analytics(bills)
 
-    # Generate AI insights if LLM key is available
+    # Check cache
+    import hashlib
+    cache_key = hashlib.md5(f"{user['id']}:{len(bills)}:{analytics['total_spend']}".encode()).hexdigest()
+    cached = _insights_cache.get(cache_key)
+    now_ts = datetime.now(timezone.utc).timestamp()
+
     ai_insights = None
-    if EMERGENT_LLM_KEY:
+    if cached and (now_ts - cached["ts"]) < _INSIGHTS_TTL:
+        ai_insights = cached["data"]
+    elif EMERGENT_LLM_KEY:
         try:
             # Build a concise summary for GPT
             summary_lines = [
@@ -3022,6 +3034,7 @@ Rules:
 
             import json as json_mod
             ai_insights = json_mod.loads(clean)
+            _insights_cache[cache_key] = {"data": ai_insights, "ts": now_ts}
         except Exception as e:
             logger.warning(f"AI insights generation failed: {e}")
             ai_insights = None

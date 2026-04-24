@@ -26,6 +26,12 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 12. Compliance Checkboxes - T&C acceptance on Registration, BECS DDR agreement on Payment Plan
 13. Resend Email Integration - With graceful fallback if API key missing
 14. Security Headers, Rate Limiting, CORS, JWT 4hr expiry
+15. AI Bill Intelligence - GPT-4o powered spending analysis with dashboard summary cards + dedicated insights page (/dashboard/insights)
+    - Spending overview & trend detection (increasing/decreasing/stable)
+    - Category breakdown with Australian benchmark comparisons
+    - Provider comparison within utility categories
+    - AI-generated highlights, savings tips, seasonal patterns
+    - 15-minute server-side cache to reduce API costs
 
 ## Pending / Backlog
 - P1: Refactor server.py (~2800 lines) into routes/, models/, utils/ modules
