@@ -32,9 +32,30 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
     - Provider comparison within utility categories
     - AI-generated highlights, savings tips, seasonal patterns
     - 15-minute server-side cache to reduce API costs
+16. Billing Smoothing Engine (v2) - /app/backend/billing_engine.py
+    - Annual bill prediction with Australian seasonal weighting (12-month forecast)
+    - Monthly equalised payment calculator (true smoothing, not divide-by-12)
+    - Excess/deficit balancing logic (plan health: healthy/tight/deficit)
+    - Savings vs traditional billing comparison with predictability scores
+    - API: /api/v2/predict-bills, /api/v2/simulate-plan, /api/v2/plan-health, /api/v2/savings-comparison
+17. Subscription Pricing Layer (v2)
+    - 3 tiers: Basic (Free, 5 bills), Standard ($9.90/mo, unlimited + AI), Premium ($19.90/mo, multi-property + 5% buffer)
+    - API: /api/v2/subscription/tiers, /api/v2/subscription/current, /api/v2/subscription/select
+18. Forecast Dashboard (/dashboard/forecast "Your Annual Plan")
+    - 12-month Traditional vs Smoothed area chart (Recharts)
+    - Stats: Fixed payment, annual predicted, peak month, seasonal variance
+    - Plan health banner with 90-day projection
+    - Savings comparison: predictability, peak bill, variance
+    - Weekly/Fortnightly/Monthly frequency toggle
+19. Production Deployment Structure
+    - Dockerfile.backend, Dockerfile.frontend, docker-compose.yml, nginx.conf
+    - .env.example with all environment variables
+    - DEPLOYMENT.md with branch strategy and upgrade checklist
 
 ## Pending / Backlog
-- P1: Refactor server.py (~2800 lines) into routes/, models/, utils/ modules
+- P1: Refactor server.py (~3100 lines) into routes/, models/, utils/ modules
 - P1: Collect Resend API Key from user for live email delivery
 - P1: Collect Accurassi API Key from user for live bill sync
+- P2: Enforce tier-gating on v2 endpoints (Basic users restricted from forecast/AI)
 - P2: Real Accurassi integration once key is provided
+- P2: Optimise ForecastDashboard to only re-fetch simulate-plan on frequency change
