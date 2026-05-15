@@ -1,0 +1,68 @@
+{
+  "summary": "Iteration 12: End-to-end testing of EasyBillsPay v2 billing smoothing engine + subscription pricing layer. Backend: 13/13 pytest cases PASS for all /api/v2/* endpoints (predict-bills, simulate-plan, plan-health, savings-comparison, subscription/tiers, subscription/current, subscription/select). Frontend: all spec items verified via Playwright — sidebar nav shows new 'Annual Plan' + 'Subscription' items, /dashboard/forecast renders title 'Your Annual Plan' with stats ($324.49/mo smoothed, $3605.49 annual predicted, peak Jul 2026, $77.42 variance), plan-health-card, Recharts forecast-chart, savings-summary (95% vs 100% predictability), category-forecast (Internet/Electricity/Gas/Water). Frequency toggles correctly change smoothed amount (Weekly $74.88 / Fortnightly $149.77 / Monthly $324.49). /dashboard/subscription shows 3 tier cards with correct pricing (Free / $9.90 / $19.90), 'Current Plan' state works after select. Existing flows (Overview, Bill Intelligence, Payment Plan, Login) all intact.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_v2_billing_smoothing.py",
+    "/app/test_reports/pytest/v2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "billing_engine.predict_annual_bills assumes monthly frequency when bill.frequency is missing/unknown via _annualize default — fine but log a warning when an unknown freq is encountered for observability.",
+    "_offset_month clamps day to 28 which is safe for month math but causes the month label to always be on day-28 of the source month; only month/year are surfaced in UI so no visible impact.",
+    "/api/v2/simulate-plan filters bills by status='pending' while predict-bills and savings-comparison use ALL bills. This is inconsistent — a user with bills all marked 'paid' would see a forecast but no simulation. Document intent or unify.",
+    "/api/v2/subscription/select takes 'tier' as a query string param on a POST — acceptable but a JSON body { tier } is more conventional and easier to validate via Pydantic.",
+    "Buffer percentage is read from SUBSCRIPTION_TIERS but the tier's buffer value (5/8) is duplicated in three endpoints; consider a single helper get_user_buffer(user_id).",
+    "ForecastDashboard.jsx fires three sequential requests (predict-bills, simulate-plan, savings-comparison, plan-health) on every freq toggle. Consider memoising predict-bills/savings-comparison since only simulate-plan depends on frequency.",
+    "SubscriptionTiers.jsx selectTier does not show a toast on failure (only re-throws); user-facing error UX is silent.",
+    "No tier-gating yet enforced on /api/v2/* endpoints — a 'basic' user can still hit forecasting endpoints (which the tier features list claims are Standard+). If tier-gating is intended, enforce it server-side."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v2_billing_smoothing.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (13/13 pytest)",
+    "frontend": "100% (all 6 review scenarios + 4 existing-feature regressions)"
+  },
+  "test_credentials": {
+    "customer": "test@billseasypay.com / Test123! (WORKS)",
+    "admin": "admin@billseasypay.com / Admin123! (WORKS)"
+  },
+  "seed_data_creation": "None — used existing 17 seeded bills across Electricity/Water/Internet/Gas. Subscription test resets user tier to 'basic' at the end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "v2 billing smoothing + subscription tiers are production-ready. Backend endpoints respond in <1s (no GPT calls). Pytest file at /app/backend/tests/test_v2_billing_smoothing.py covers: 12-month forecast shape, seasonal variation, auth gating, frequency-based per-period amount differences, invalid frequency 400, plan-health response shape, savings-comparison shape, 3-tier list with correct pricing ($0/$9.90/$19.90), default 'basic', tier select persistence, invalid tier 400, and premium-vs-basic buffer difference (5% vs 8% reflected in smoothed_amount). Frontend data-testids verified: forecast-dashboard, forecast-title, stat-smoothed-amount, stat-annual-predicted, stat-peak-month, stat-variance, plan-health-card, forecast-chart, savings-summary, category-forecast, freq-weekly/fortnightly/monthly, subscription-tiers, tiers-title, tier-basic/standard/premium, select-tier-basic/standard/premium, nav-annual-plan, nav-subscription.",
+  "features_verified": {
+    "backend_predict_bills_12_month": "PASS — 12 entries, total $3605.49, 4 categories present",
+    "backend_predict_bills_seasonal_weighting": "PASS — max > min across months",
+    "backend_predict_bills_auth_required": "PASS — 401/403 without token",
+    "backend_simulate_plan_monthly": "PASS — periods=12, smoothed_amount=$324.49, variance present",
+    "backend_simulate_plan_frequency_changes": "PASS — weekly<fortnightly<monthly amounts",
+    "backend_simulate_plan_invalid_frequency": "PASS — 400 for 'daily'",
+    "backend_plan_health_shape": "PASS — status=healthy + wallet/projected fields",
+    "backend_savings_comparison_shape": "PASS — has_data, traditional + smoothed + 12 monthly comparisons",
+    "backend_subscription_tiers_list": "PASS — 3 tiers with id/name/monthly_fee/features/buffer_pct, correct prices",
+    "backend_subscription_current_defaults_basic": "PASS",
+    "backend_subscription_select_persists": "PASS — standard, premium round-trips OK",
+    "backend_subscription_select_invalid_400": "PASS",
+    "backend_premium_buffer_5pct_vs_basic_8pct": "PASS — smoothed amount lower for premium",
+    "frontend_sidebar_new_nav_items": "PASS — nav-annual-plan + nav-subscription present, all 6 existing items intact",
+    "frontend_forecast_page_loads": "PASS — title='Your Annual Plan'",
+    "frontend_forecast_stats": "PASS — smoothed $324.49/mo, annual $3605.49, peak Jul 2026 $346.88, variance $77.42",
+    "frontend_forecast_plan_health_card": "PASS — green 'on track' state with wallet/upcoming/projected",
+    "frontend_forecast_chart_recharts": "PASS — Smoothed vs Traditional area chart rendered",
+    "frontend_forecast_savings_summary": "PASS — 95% vs 100% predictability, peak monthly bill comparison",
+    "frontend_forecast_category_breakdown": "PASS — Internet $5220, Electricity $4250, Gas $3474, Water $1690",
+    "frontend_frequency_toggles": "PASS — Weekly $74.88 / Fortnightly $149.77 / Monthly $324.49 distinct",
+    "frontend_subscription_page": "PASS — title='Choose Your Plan', 3 cards Basic/Standard/Premium with $0/$9.90/$19.90 + features",
+    "frontend_subscription_select_flow": "PASS — clicking Select Standard updates button to 'Current Plan' (disabled), persists",
+    "frontend_existing_regression": "PASS — Overview, Bill Intelligence, Payment Plan navigation still work"
+  }
+}

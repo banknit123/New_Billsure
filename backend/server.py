@@ -3045,6 +3045,117 @@ Rules:
     }
 
 
+# ========== V2 BILLING ENGINE ENDPOINTS ==========
+from billing_engine import (
+    predict_annual_bills,
+    calculate_smoothed_payment,
+    compute_plan_health,
+    calculate_savings_comparison,
+    SUBSCRIPTION_TIERS,
+)
+
+
+@api_router.get("/v2/predict-bills")
+async def v2_predict_bills(current_user: dict = Depends(get_current_user)):
+    """12-month bill forecast with seasonal weighting."""
+    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
+    if not bills:
+        return {"prediction": None, "message": "No bills to predict."}
+    return {"prediction": predict_annual_bills(bills)}
+
+
+@api_router.get("/v2/simulate-plan")
+async def v2_simulate_plan(
+    frequency: str = "monthly",
+    current_user: dict = Depends(get_current_user),
+):
+    """Simulate smoothed payment plan with seasonal adjustments."""
+    if frequency not in ("weekly", "fortnightly", "monthly"):
+        raise HTTPException(status_code=400, detail="Invalid frequency")
+
+    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(500)
+    if not bills:
+        return {"simulation": None, "message": "No pending bills."}
+
+    # Determine buffer based on user subscription tier
+    user_sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
+    tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
+    buffer_pct = tier["buffer_pct"]
+
+    simulation = calculate_smoothed_payment(bills, frequency, buffer_pct)
+    return {"simulation": simulation}
+
+
+@api_router.get("/v2/plan-health")
+async def v2_plan_health(current_user: dict = Depends(get_current_user)):
+    """Excess/deficit balancing — is the plan on track?"""
+    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not plan or plan.get("status") != "active":
+        return {"health": None, "message": "No active plan."}
+
+    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
+    transactions = await db.transactions.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+
+    health = compute_plan_health(plan, bills, user.get("wallet_balance", 0), transactions)
+    return {"health": health}
+
+
+@api_router.get("/v2/savings-comparison")
+async def v2_savings_comparison(current_user: dict = Depends(get_current_user)):
+    """Compare smoothed vs traditional billing."""
+    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
+    if not bills:
+        return {"comparison": None, "message": "No bills to compare."}
+
+    user_sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
+    tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
+
+    comparison = calculate_savings_comparison(bills, tier["buffer_pct"])
+    return {"comparison": comparison}
+
+
+@api_router.get("/v2/subscription/tiers")
+async def v2_get_subscription_tiers():
+    """Get all available subscription tiers."""
+    return {"tiers": list(SUBSCRIPTION_TIERS.values())}
+
+
+@api_router.get("/v2/subscription/current")
+async def v2_get_current_subscription(current_user: dict = Depends(get_current_user)):
+    """Get user's current subscription."""
+    sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    if not sub:
+        return {"subscription": SUBSCRIPTION_TIERS["basic"], "tier": "basic"}
+    tier = SUBSCRIPTION_TIERS.get(sub.get("tier", "basic"), SUBSCRIPTION_TIERS["basic"])
+    return {"subscription": tier, "tier": sub.get("tier", "basic")}
+
+
+@api_router.post("/v2/subscription/select")
+async def v2_select_subscription(tier: str, current_user: dict = Depends(get_current_user)):
+    """Select a subscription tier."""
+    if tier not in SUBSCRIPTION_TIERS:
+        raise HTTPException(status_code=400, detail="Invalid tier")
+
+    sub_doc = {
+        "user_id": current_user["id"],
+        "tier": tier,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "active",
+    }
+    await db.subscriptions.delete_many({"user_id": current_user["id"]})
+    await db.subscriptions.insert_one(sub_doc)
+    sub_doc.pop("_id", None)
+
+    return {
+        "message": f"Subscribed to {SUBSCRIPTION_TIERS[tier]['name']} plan",
+        "subscription": SUBSCRIPTION_TIERS[tier],
+        "tier": tier,
+    }
+
+
 # Include router
 app.include_router(api_router)
 
