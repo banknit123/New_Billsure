@@ -150,8 +150,7 @@ class User(BaseModel):
     full_name: str
     phone: Optional[str] = None
     wallet_balance: float = 0.0
-    subscription_active: bool = True
-    subscription_fee: float = 5.0
+    subscription_fee: float = 0.0
     is_admin: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -2381,7 +2380,6 @@ async def generate_notifications():
                                 "type": "overdue",
                                 "title": f"Overdue: {bill['provider']}",
                                 "message": f"Your {bill['category']} bill of ${bill['amount']:.2f} from {bill['provider']} was due on {due_str}.",
-                                "severity": "critical",
                                 "read": False,
                                 "email_sent": False,
                                 "created_at": now.isoformat(),
@@ -2401,7 +2399,6 @@ async def generate_notifications():
                                 "type": "upcoming",
                                 "title": f"Due Soon: {bill['provider']}",
                                 "message": f"Your {bill['category']} bill of ${bill['amount']:.2f} is due in {max(days_left, 0)} day(s) ({due_str}).",
-                                "severity": "warning",
                                 "read": False,
                                 "email_sent": False,
                                 "created_at": now.isoformat(),
@@ -2421,7 +2418,6 @@ async def generate_notifications():
                             "type": "low_balance",
                             "title": "Low Wallet Balance",
                             "message": f"Your wallet (${wallet:.2f}) may not cover your pending bills (${total_pending:.2f}). Consider topping up.",
-                            "severity": "warning",
                             "read": False,
                             "email_sent": False,
                             "created_at": now.isoformat(),

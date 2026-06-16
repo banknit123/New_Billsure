@@ -67,8 +67,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={user ? (user.is_admin ? <Navigate to="/admin" /> : <Navigate to="/dashboard" />) : <LandingPage />} />
-          <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <Login />} />
-          <Route path="/register" element={user ? <Navigate to="/dashboard" /> : <Register />} />
+          <Route path="/login" element={user ? (user.is_admin ? <Navigate to="/admin" /> : <Navigate to="/dashboard" />) : <Login />} />
+          <Route path="/register" element={user ? (user.is_admin ? <Navigate to="/admin" /> : <Navigate to="/dashboard" />) : <Register />} />
           <Route
             path="/dashboard/*"
             element={user ? <Dashboard /> : <Navigate to="/login" />}

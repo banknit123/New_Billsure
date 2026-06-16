@@ -5,7 +5,8 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 
 ## Architecture
 - **Frontend**: React.js, TailwindCSS, Shadcn UI, Recharts, Lucide-React
-- **Backend**: FastAPI, MongoDB (Motor), JWT, Passlib, pdfplumber, reportlab, emergentintegrations (Stripe + OpenAI GPT Vision), cryptography (Fernet)
+- **Backend**: FastAPI, Supabase (Postgres), JWT, Passlib, pdfplumber, reportlab, emergentintegrations (Stripe + OpenAI GPT Vision), cryptography (Fernet)
+- **Database**: Supabase Postgres with RLS, audit triggers, indexes
 - **Payments**: Stripe Checkout (Card + BECS Direct Debit ready), Admin BPAY/bank payments
 - **Bill Extraction**: pdfplumber (text PDFs) + GPT-4o Vision (images/scanned PDFs) + Accurassi API
 - **Encryption**: Fernet (AES-128-CBC)
