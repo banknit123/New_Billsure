@@ -1,0 +1,71 @@
+{
+  "summary": "Iteration 13: Supabase Postgres migration validation for EasyBillsPay. Backend pytest: 16/17 PASS (1 critical fail: /api/auth/register 500). Frontend E2E (Playwright): customer login + dashboard + bills + bill intelligence (AI summary) + annual plan (forecast w/ Recharts chart + $5657.89 annual / $509.21 smoothed / Peak Jul 2026 / $91.04 variance + savings 93%->100% + category breakdown) + subscription (3 tiers, Basic Current Plan state) + payment plan (Weekly $120.37 / Fortnightly $240.75 / Monthly $521.62) all PASS. Admin login authenticates but does NOT auto-redirect to /admin; direct navigation to /admin renders Admin Panel correctly with role-gated sidebar. Most data flows from Supabase (6 seeded bills visible: AGL Energy, Origin Energy, Origin Gas, Sydney Water, Aussie Broadband; wallet $500). Migration successful EXCEPT registration.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/register",
+        "issue": "Returns 500 — postgrest APIError PGRST204: 'Could not find the subscription_active column of users in the schema cache'. The User Pydantic model (server.py:153) has `subscription_active: bool = True` but the Supabase users table schema (schema.sql) is missing this column. Insert fails for every new registration.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {"endpoint": "GET /api/health", "issue": "Returns 404 — no health endpoint exists (was not present pre-migration either)."},
+      {"endpoint": "Backend startup logs", "issue": "passlib bcrypt version warning: 'AttributeError: module bcrypt has no attribute __about__' — non-fatal, hashing still works."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Admin post-login redirect",
+        "issue": "After successful admin login, app redirects to /dashboard (customer view) rather than /admin. User must manually navigate to /admin to see Admin Panel. Review request expected: 'Admin login redirects to admin dashboard'. Admin Panel itself works when accessed directly.",
+        "affected_selectors": ["login flow / role-based redirect logic"]
+      },
+      {
+        "flow": "Admin Panel Financial Overview cards",
+        "issue": "Stat cards on /admin (Financial Overview) appear as empty skeleton placeholders on initial load — could not confirm whether real numbers render (snapshot may be pre-data). /api/admin/financial-overview returns 200 so this is likely a render race, but worth verifying.",
+        "affected_selectors": ["admin financial cards"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_supabase_migration.py",
+    "/app/test_reports/pytest/supabase_migration.xml"
+  ],
+  "action_items": [
+    "CRITICAL: Fix /api/auth/register — either (a) add `subscription_active BOOLEAN DEFAULT TRUE` column to users table in schema.sql + re-run migration, or (b) drop `subscription_active` from User model / strip it from user_dict before sdb.insert_one. Recommend (a) for parity with original Mongo schema.",
+    "Add role-based redirect in frontend Login: if user.role==='admin' route to /admin instead of /dashboard.",
+    "Verify Admin Panel Financial Overview cards populate with data (may be a loading-state render bug).",
+    "Optionally add GET /api/health for monitoring."
+  ],
+  "critical_code_review_comments": [
+    "server.py:153 User model field `subscription_active` is not in Supabase users table — schema drift between Pydantic model and Postgres DDL. Run a schema-sync check at startup.",
+    "supabase_db.py insert_one passes full dict; any extra Pydantic-only field raises PGRST204. Either filter fields against a column allowlist or align schema strictly.",
+    "Auth payload uses key `token` (not `access_token`) — inconsistent with common conventions; ensure docs match.",
+    "/api/auth/register and other write paths should wrap APIError in 400/500 with a meaningful message instead of bubbling raw 500.",
+    "Bills response returns `provider` instead of `biller_name` — keep field naming consistent across collections/tables.",
+    "passlib bcrypt warning indicates bcrypt>=4 incompatibility; pin bcrypt<4 in requirements.txt or upgrade passlib."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_supabase_migration.py (new)"
+  ],
+  "success_rate": {
+    "backend": "94% (16/17 pytest)",
+    "frontend": "88% (7/8 review scenarios — customer flows 100%, admin redirect missing)"
+  },
+  "test_credentials": {
+    "customer": "test@billseasypay.com / Test123! (WORKS)",
+    "admin": "admin@billseasypay.com / Admin123! (WORKS — login OK, but routes to /dashboard not /admin)"
+  },
+  "seed_data_creation": "Created 1 TEST_ bill (TEST_Migration Biller, $42.50) via /api/bills POST to verify Supabase persistence. Round-trips via GET. Not cleaned up.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Supabase migration is mostly successful. CORE FUNCTIONALITY INTACT: login, bills CRUD, payment plan calc, payment-plan/current, bill intelligence (GPT ~10-15s), v2 predict-bills, v2 plan-health (returns {health:null,message:'No active plan.'} when no plan selected — accepted), v2 savings-comparison, v2 subscription/tiers (3 tiers Basic Free / Standard $9.90 / Premium $19.90), v2 subscription/current, notifications list (reserved 'read' column works), admin/users, admin/stats, admin/financial-overview, admin/customer-analytics. ONLY failing endpoint: /api/auth/register (500 PGRST204 missing subscription_active column). Frontend role-based redirect missing — admin lands on /dashboard. Test file at /app/backend/tests/test_supabase_migration.py covers all critical endpoints with create→GET persistence pattern. Token field is `token`, not `access_token`. Register body requires `full_name` not `name`. Bill model uses `provider` field (also accepts `biller_name`); POST /api/bills requires `provider` + `account_number`.",
+  "rca_of_the_issue": {
+    "bug": "/api/auth/register 500 error",
+    "root_cause": "User Pydantic model in server.py defines `subscription_active: bool = True`. During registration this flag is included in user_dict and passed to sdb.insert_one('users', user_dict). The Supabase migration of schema.sql did NOT create a `subscription_active` column on the users table, so PostgREST rejects the insert with code PGRST204.",
+    "reproduction": "POST /api/auth/register with {email,password,full_name} → 500 Internal Server Error. Backend log: postgrest.exceptions.APIError: {'message': \\\"Could not find the 'subscription_active' column of 'users' in the schema cache\\\", 'code': 'PGRST204'}",
+    "mitigation": "ALTER TABLE users ADD COLUMN subscription_active BOOLEAN NOT NULL DEFAULT TRUE; (and add it to schema.sql so re-provisions stay consistent). Then NOTIFY pgrst 'reload schema' (or restart PostgREST) so the schema cache picks it up. Alternatively, remove the field from User model if unused."
+  }
+}
