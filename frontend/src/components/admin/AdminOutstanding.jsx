@@ -44,7 +44,7 @@ const AdminOutstanding = () => {
   const colorMap = {
     red: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200' },
     amber: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
-    blue: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
+    blue: { bg: 'bg-blue-50', text: 'text-teal', border: 'border-blue-200' },
     slate: { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' },
   };
 

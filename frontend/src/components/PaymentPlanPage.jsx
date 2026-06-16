@@ -154,7 +154,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
               </div>
               <div>
                 <p className="text-xs text-slate-500">Safety Buffer</p>
-                <p className="text-xl font-bold text-blue-600" style={{ fontFamily: 'Outfit, sans-serif' }}>
+                <p className="text-xl font-bold text-teal" style={{ fontFamily: 'Outfit, sans-serif' }}>
                   {calcData.safety_buffer_pct}%
                 </p>
               </div>
@@ -173,17 +173,17 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
               </div>
               <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
                 <div className="h-full rounded-full flex">
-                  <div className="bg-slate-900 rounded-l-full" style={{
+                  <div className="bg-navy rounded-l-full" style={{
                     width: `${(calcData.annual_bill_total / calcData.buffered_annual * 100).toFixed(1)}%`
                   }} />
-                  <div className="bg-blue-500 rounded-r-full" style={{
+                  <div className="bg-teal-500 rounded-r-full" style={{
                     width: `${(100 - calcData.annual_bill_total / calcData.buffered_annual * 100).toFixed(1)}%`
                   }} />
                 </div>
               </div>
               <div className="flex justify-between text-xs mt-1">
                 <span className="text-slate-600">${calcData.annual_bill_total?.toFixed(2)}</span>
-                <span className="text-blue-600">+${(calcData.buffered_annual - calcData.annual_bill_total).toFixed(2)}</span>
+                <span className="text-teal">+${(calcData.buffered_annual - calcData.annual_bill_total).toFixed(2)}</span>
               </div>
             </div>
           </CardContent>
@@ -207,8 +207,8 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                   <CardContent className="p-6">
                     {isActive && (
                       <div className="flex items-center gap-1.5 mb-3">
-                        <Check size={14} className="text-blue-600" />
-                        <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">Active Plan</span>
+                        <Check size={14} className="text-teal" />
+                        <span className="text-xs font-semibold text-teal uppercase tracking-wider">Active Plan</span>
                       </div>
                     )}
                     <p className="text-xs tracking-widest uppercase font-medium text-slate-400 mb-1">{opt.label}</p>
@@ -233,7 +233,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                     <Button
                       onClick={() => selectPlan(opt.frequency)}
                       disabled={selecting === opt.frequency || isActive}
-                      className={`w-full text-sm ${isActive ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-900 hover:bg-slate-800'}`}
+                      className={`w-full text-sm ${isActive ? 'bg-teal hover:bg-teal-600' : 'bg-navy hover:bg-navy-700'}`}
                       data-testid={`select-plan-${opt.frequency}`}
                     >
                       {selecting === opt.frequency ? (
@@ -305,7 +305,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                   onClick={() => setPaymentType('card')}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
                     paymentType === 'card'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-navy text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                   data-testid="payment-type-card"
@@ -317,7 +317,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                   onClick={() => setPaymentType('au_becs_debit')}
                   className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${
                     paymentType === 'au_becs_debit'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-navy text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                   data-testid="payment-type-becs"
@@ -328,10 +328,10 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
               </div>
 
               {paymentType === 'au_becs_debit' && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800" data-testid="becs-info-banner">
+                <div className="bg-teal-50 border border-teal-200 rounded-lg p-3 mb-4 text-xs text-blue-800" data-testid="becs-info-banner">
                   <p className="font-semibold mb-1">AU BECS Direct Debit</p>
                   <p>Pay directly from your Australian bank account. BSB and account details are collected securely by Stripe — never stored on our servers. PCI DSS compliant.</p>
-                  <div className="flex items-start gap-2 mt-3 pt-3 border-t border-blue-200">
+                  <div className="flex items-start gap-2 mt-3 pt-3 border-t border-teal-200">
                     <Checkbox
                       id="becs-agree"
                       checked={becsAgreed}
@@ -341,7 +341,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                     />
                     <label htmlFor="becs-agree" className="text-xs text-blue-800 leading-relaxed cursor-pointer">
                       I have read and agree to the{' '}
-                      <Link to="/legal/becs" target="_blank" className="font-semibold underline hover:text-blue-600">BECS Direct Debit Service Agreement</Link>
+                      <Link to="/legal/becs" target="_blank" className="font-semibold underline hover:text-teal">BECS Direct Debit Service Agreement</Link>
                       {' '}and authorise EasyBillsPay to debit my account.
                     </label>
                   </div>
@@ -358,15 +358,15 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                   <Button key={pkg.id} variant="outline" size="sm"
                     onClick={() => handleStripeCheckout(pkg.id)}
                     disabled={checkingOut === pkg.id || (paymentType === 'au_becs_debit' && !becsAgreed)}
-                    className="border-slate-300 text-sm h-10 hover:border-blue-400 hover:bg-blue-50"
+                    className="border-slate-300 text-sm h-10 hover:border-blue-400 hover:bg-teal-50"
                     data-testid={`stripe-topup-${pkg.id}`}
                   >
                     {checkingOut === pkg.id ? (
                       <Loader2 className="animate-spin mr-1" size={14} />
                     ) : paymentType === 'au_becs_debit' ? (
-                      <Building2 size={14} className="mr-1.5 text-blue-600" />
+                      <Building2 size={14} className="mr-1.5 text-teal" />
                     ) : (
-                      <CreditCard size={14} className="mr-1.5 text-blue-600" />
+                      <CreditCard size={14} className="mr-1.5 text-teal" />
                     )}
                     {pkg.label}
                   </Button>
@@ -397,7 +397,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                       tx.type === 'auto_deduction' || tx.type === 'plan_deduction' || tx.type === 'stripe_topup' || tx.type === 'deposit'
                         ? 'bg-green-50 text-green-600'
                         : tx.type === 'auto_bill_payment' || tx.type === 'bill_payment'
-                          ? 'bg-blue-50 text-blue-600'
+                          ? 'bg-teal-50 text-teal'
                           : 'bg-slate-100 text-slate-600'
                     }`}>
                       {tx.type.includes('deduction') || tx.type.includes('deposit') || tx.type.includes('topup') ? (

@@ -72,7 +72,7 @@ const NotificationBell = () => {
             <p className="text-sm font-semibold text-slate-900">Notifications</p>
             <div className="flex items-center gap-2">
               {unread > 0 && (
-                <button onClick={markAllRead} className="text-xs text-blue-600 hover:underline" data-testid="mark-all-read-btn">
+                <button onClick={markAllRead} className="text-xs text-teal hover:underline" data-testid="mark-all-read-btn">
                   Mark all read
                 </button>
               )}
@@ -91,7 +91,7 @@ const NotificationBell = () => {
             ) : (
               notifs.slice(0, 20).map(n => (
                 <div key={n.id}
-                  className={`px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors flex gap-3 ${!n.read ? 'bg-blue-50/50' : ''}`}
+                  className={`px-4 py-3 border-b border-slate-50 hover:bg-slate-50 transition-colors flex gap-3 ${!n.read ? 'bg-teal-50/50' : ''}`}
                   data-testid={`notification-item-${n.id}`}>
                   <div className="mt-0.5 flex-shrink-0">{iconMap[n.type] || <Bell size={14} className="text-slate-400" />}</div>
                   <div className="flex-1 min-w-0">
@@ -101,7 +101,7 @@ const NotificationBell = () => {
                   </div>
                   <div className="flex flex-col gap-1 flex-shrink-0">
                     {!n.read && (
-                      <button onClick={() => markRead(n.id)} className="text-[10px] text-blue-600 hover:underline">Read</button>
+                      <button onClick={() => markRead(n.id)} className="text-[10px] text-teal hover:underline">Read</button>
                     )}
                     <button onClick={() => deleteNotif(n.id)} className="text-[10px] text-slate-400 hover:text-red-500">Dismiss</button>
                   </div>

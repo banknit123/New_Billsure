@@ -32,9 +32,10 @@ export default function AdminDashboard() {
         lg:translate-x-0
       `}>
         <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            Admin Panel
-          </h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo.jpg" alt="EasyBillsPay" className="h-7 rounded" />
+            <span className="text-xs font-semibold text-teal bg-teal-50 px-2 py-0.5 rounded">Admin</span>
+          </div>
           <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
             <X size={20} />
           </button>
@@ -45,7 +46,7 @@ export default function AdminDashboard() {
             <NavLink key={to} to={to} end={end} onClick={closeSidebar}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  isActive ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  isActive ? 'bg-navy text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`
               }
               data-testid={`admin-nav-${label.toLowerCase().replace(/\s/g, '-')}`}
@@ -56,7 +57,7 @@ export default function AdminDashboard() {
           ))}
 
           <NavLink to="/dashboard" onClick={closeSidebar}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-all mt-4"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-teal hover:bg-blue-50 transition-all mt-4"
             data-testid="admin-back-to-dashboard"
           >
             <ArrowLeft size={18} strokeWidth={1.5} />

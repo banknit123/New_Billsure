@@ -46,27 +46,27 @@ export default function Login() {
               <Label className="text-xs font-medium text-slate-600">Email</Label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com" required data-testid="login-email-input"
-                className="h-11 border-slate-200 focus:border-blue-500 focus:ring-blue-500" />
+                className="h-11 border-slate-200 focus:border-teal focus:ring-teal" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">Password</Label>
               <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter password" required data-testid="login-password-input"
-                className="h-11 border-slate-200 focus:border-blue-500 focus:ring-blue-500" />
+                className="h-11 border-slate-200 focus:border-teal focus:ring-teal" />
             </div>
             <Button type="submit" disabled={loading} data-testid="login-submit-btn"
-              className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-sm font-medium">
+              className="w-full h-11 bg-navy hover:bg-navy-700 text-sm font-medium">
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
 
           <p className="text-sm text-slate-500 text-center mt-6">
             Don't have an account?{' '}
-            <Link to="/register" className="text-blue-600 hover:underline font-medium">Create one</Link>
+            <Link to="/register" className="text-teal hover:underline font-medium">Create one</Link>
           </p>
         </div>
       </div>
-      <div className="hidden lg:block lg:w-[45%] bg-slate-900 relative overflow-hidden">
+      <div className="hidden lg:block lg:w-[45%] bg-navy relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900" />
         <div className="relative z-10 h-full flex flex-col justify-center px-16">
           <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">EasyBillsPay</p>

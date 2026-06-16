@@ -367,9 +367,9 @@ const AccurassiBillExtractor = ({ user, refreshUser }) => {
 
         {/* Info Box */}
         {!file && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-teal-50 border border-teal-200 rounded-lg p-4">
             <div className="flex items-start gap-2">
-              <AlertCircle className="text-blue-600 mt-0.5 flex-shrink-0" size={18} />
+              <AlertCircle className="text-teal mt-0.5 flex-shrink-0" size={18} />
               <div className="text-sm text-blue-900">
                 <p className="font-semibold mb-1">Supported Bill Types</p>
                 <ul className="space-y-0.5 text-blue-800 text-xs">

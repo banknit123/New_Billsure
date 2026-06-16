@@ -53,8 +53,14 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
     - .env.example with all environment variables
     - DEPLOYMENT.md with branch strategy and upgrade checklist
 
+## Design
+- **Color Palette**: Navy (#1A344B) + Teal (#17B5A7) + White
+- **Logo**: /app/frontend/public/logo.jpg (EasyBillsPay with teal dollar icon)
+- **Fonts**: Outfit (headings), Manrope (body)
+- **UI Library**: Shadcn UI + TailwindCSS + Recharts
+
 ## Pending / Backlog
-- P2: Further refactor server.py routes into separate route files (routes/auth.py, routes/bills.py, etc.)
-- P2: Supabase Auth migration (replace custom JWT with Supabase built-in auth)
+- P1: Supabase Auth migration (replace custom JWT with Supabase built-in auth — playbook ready)
+- P2: Further refactor server.py routes into separate route files
 - P2: Add GET /api/health endpoint for monitoring
 - P3: Cache subscription tier per-request to reduce DB calls

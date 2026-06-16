@@ -163,7 +163,7 @@ const AdminHome = () => {
 
 const KPI = ({ icon: Icon, label, value, sub, color }) => {
   const colorMap = {
-    blue: 'bg-blue-50 text-blue-600',
+    blue: 'bg-blue-50 text-teal',
     green: 'bg-green-50 text-green-600',
     amber: 'bg-amber-50 text-amber-600',
     slate: 'bg-slate-100 text-slate-600',

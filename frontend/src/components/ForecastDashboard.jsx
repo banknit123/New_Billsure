@@ -58,12 +58,12 @@ const ForecastDashboard = ({ user }) => {
 
   if (upgradeNeeded) {
     return (
-      <Card className="border-blue-200 bg-blue-50" data-testid="forecast-upgrade">
+      <Card className="border-teal-200 bg-teal-50" data-testid="forecast-upgrade">
         <CardContent className="p-12 text-center">
           <Target className="mx-auto mb-4 text-blue-400" size={48} />
           <h3 className="text-lg font-semibold text-slate-900 mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>Upgrade to Unlock Forecasting</h3>
           <p className="text-sm text-slate-500 max-w-sm mx-auto mb-4">12-month bill forecasting, payment smoothing, and savings analysis are available on Standard and Premium plans.</p>
-          <Button onClick={() => navigate('/dashboard/subscription')} className="bg-blue-600 hover:bg-blue-700 text-sm">
+          <Button onClick={() => navigate('/dashboard/subscription')} className="bg-teal hover:bg-teal-600 text-sm">
             View Plans <ArrowRight size={14} className="ml-1.5" />
           </Button>
         </CardContent>
@@ -78,7 +78,7 @@ const ForecastDashboard = ({ user }) => {
           <Calendar className="mx-auto mb-4 text-slate-300" size={48} />
           <h3 className="text-lg font-semibold text-slate-900 mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>No Bills to Forecast</h3>
           <p className="text-sm text-slate-500 max-w-sm mx-auto mb-4">Upload your bills to unlock 12-month forecasting, payment smoothing, and savings analysis.</p>
-          <Button onClick={() => navigate('/dashboard/bills')} className="bg-slate-900 hover:bg-slate-800 text-sm">
+          <Button onClick={() => navigate('/dashboard/bills')} className="bg-navy hover:bg-navy-700 text-sm">
             Upload Bills <ArrowRight size={14} className="ml-1.5" />
           </Button>
         </CardContent>
@@ -105,7 +105,7 @@ const ForecastDashboard = ({ user }) => {
               onClick={() => setFrequency(f)}
               className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
                 frequency === f
-                  ? 'bg-slate-900 text-white border-slate-900'
+                  ? 'bg-navy text-white border-slate-900'
                   : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
               }`}
               data-testid={`freq-${f}`}
@@ -124,7 +124,7 @@ const ForecastDashboard = ({ user }) => {
             value={`$${simulation.smoothed_amount.toFixed(2)}`}
             sub={`per ${frequency === 'weekly' ? 'week' : frequency === 'fortnightly' ? 'fortnight' : 'month'}`}
             icon={DollarSign}
-            color="bg-blue-50 text-blue-600"
+            color="bg-teal-50 text-teal"
             testId="stat-smoothed-amount"
           />
           <StatCard
@@ -195,12 +195,12 @@ const ForecastDashboard = ({ user }) => {
               <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <defs>
                   <linearGradient id="gradTraditional" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f87171" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#f87171" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#1A344B" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#1A344B" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradSmoothed" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#17B5A7" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#17B5A7" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -211,8 +211,8 @@ const ForecastDashboard = ({ user }) => {
                   formatter={(v, name) => [`$${v.toFixed(2)}`, name]}
                 />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="traditional" name="Traditional" stroke="#f87171" strokeWidth={2} fill="url(#gradTraditional)" />
-                <Area type="monotone" dataKey="smoothed" name="Smoothed" stroke="#3b82f6" strokeWidth={2} fill="url(#gradSmoothed)" strokeDasharray="6 3" />
+                <Area type="monotone" dataKey="traditional" name="Traditional" stroke="#1A344B" strokeWidth={2} fill="url(#gradTraditional)" />
+                <Area type="monotone" dataKey="smoothed" name="Smoothed" stroke="#17B5A7" strokeWidth={2} fill="url(#gradSmoothed)" strokeDasharray="6 3" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>
@@ -286,7 +286,7 @@ const ForecastDashboard = ({ user }) => {
                             <span className="text-sm font-bold text-slate-900">${data.annual.toFixed(0)}/yr</span>
                           </div>
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
+                            <div className="h-full bg-teal-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
                           </div>
                           <p className="text-[10px] text-slate-400 mt-0.5">{data.bill_count} bill{data.bill_count !== 1 ? 's' : ''} &middot; ~${data.monthly_avg.toFixed(2)}/mo avg</p>
                         </div>
@@ -308,7 +308,7 @@ const ForecastDashboard = ({ user }) => {
               {health.upcoming_bills.slice(0, 8).map((b, i) => (
                 <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 border border-slate-100" data-testid={`upcoming-bill-${i}`}>
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
                       <Clock size={14} className="text-blue-500" />
                     </div>
                     <div>
@@ -349,14 +349,14 @@ const CompareRow = ({ label, left, right, leftLabel, rightLabel, highlight }) =>
     <p className="text-xs font-medium text-slate-500 mb-1.5">{label}</p>
     <div className="flex items-center gap-3">
       <div className={`flex-1 text-center py-2 rounded-lg border text-sm font-semibold ${
-        highlight === 'left' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-600'
+        highlight === 'left' ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-slate-50 border-slate-200 text-slate-600'
       }`}>
         <span className="block text-[10px] font-normal text-slate-400 mb-0.5">{leftLabel}</span>
         {left}
       </div>
       <ArrowRight size={14} className="text-slate-300 flex-shrink-0" />
       <div className={`flex-1 text-center py-2 rounded-lg border text-sm font-semibold ${
-        highlight === 'right' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-600'
+        highlight === 'right' ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-slate-50 border-slate-200 text-slate-600'
       }`}>
         <span className="block text-[10px] font-normal text-slate-400 mb-0.5">{rightLabel}</span>
         {right}

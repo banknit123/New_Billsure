@@ -145,7 +145,7 @@ const AdminPayments = () => {
         <Card className="border-slate-200">
           <CardContent className="p-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-lg bg-blue-50 flex items-center justify-center">
-              <DollarSign size={22} className="text-blue-600" />
+              <DollarSign size={22} className="text-teal" />
             </div>
             <div>
               <p className="text-xs text-slate-500 uppercase tracking-wide font-medium">Total Amount</p>
@@ -200,7 +200,7 @@ const AdminPayments = () => {
             <CardHeader className="px-6 py-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => toggleProvider(provider.provider)}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Banknote size={20} className="text-blue-600" />
+                  <Banknote size={20} className="text-teal" />
                   <div>
                     <CardTitle className="text-base font-semibold text-slate-900">{provider.provider}</CardTitle>
                     <p className="text-xs text-slate-500 mt-0.5">

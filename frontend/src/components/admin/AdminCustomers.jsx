@@ -93,7 +93,7 @@ const AdminCustomers = () => {
                       <td className="px-5 py-3 text-sm text-slate-900">${c.wallet_balance.toFixed(2)}</td>
                       <td className="px-5 py-3">
                         {c.has_plan ? (
-                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-blue-600 capitalize">
+                          <span className="text-xs font-medium px-2 py-0.5 rounded bg-blue-50 text-teal capitalize">
                             {c.plan_frequency}
                           </span>
                         ) : (
@@ -123,7 +123,7 @@ const AdminCustomers = () => {
 
 const SummaryCard = ({ icon: Icon, label, value, color }) => {
   const colors = {
-    blue: 'bg-blue-50 text-blue-600',
+    blue: 'bg-blue-50 text-teal',
     green: 'bg-green-50 text-green-600',
     red: 'bg-red-50 text-red-600',
     amber: 'bg-amber-50 text-amber-600',

@@ -50,9 +50,7 @@ export default function Dashboard() {
         lg:translate-x-0
       `}>
         <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            EasyBillsPay
-          </h1>
+          <img src="/logo.jpg" alt="EasyBillsPay" className="h-8 rounded" />
           <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
             <X size={20} />
           </button>
@@ -64,7 +62,7 @@ export default function Dashboard() {
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-slate-900 text-white'
+                    ? 'bg-navy text-white'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`
               }
@@ -77,7 +75,7 @@ export default function Dashboard() {
 
           {user?.is_admin && (
             <NavLink to="/admin" onClick={closeSidebar}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-blue-600 hover:bg-blue-50 transition-all"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-teal hover:bg-teal-50 transition-all"
               data-testid="nav-admin"
             >
               <Shield size={18} strokeWidth={1.5} />

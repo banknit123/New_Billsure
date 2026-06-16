@@ -34,7 +34,7 @@ const CATEGORY_COLORS = {
 const HIGHLIGHT_ICONS = {
   increasing: { icon: TrendingUp, color: 'text-red-500', bg: 'bg-red-50' },
   decreasing: { icon: TrendingDown, color: 'text-green-500', bg: 'bg-green-50' },
-  stable: { icon: Minus, color: 'text-blue-500', bg: 'bg-blue-50' },
+  stable: { icon: Minus, color: 'text-teal', bg: 'bg-teal-50' },
   warning: { icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-50' },
   saving: { icon: PiggyBank, color: 'text-emerald-500', bg: 'bg-emerald-50' },
 };
@@ -42,7 +42,7 @@ const HIGHLIGHT_ICONS = {
 const PRIORITY_COLORS = {
   high: 'bg-red-100 text-red-700',
   medium: 'bg-amber-100 text-amber-700',
-  low: 'bg-blue-100 text-blue-700',
+  low: 'bg-teal-100 text-teal-700',
 };
 
 const BillIntelligence = () => {
@@ -85,7 +85,7 @@ const BillIntelligence = () => {
         <CardContent className="p-8 text-center">
           <AlertTriangle className="mx-auto mb-3 text-amber-500" size={32} />
           <p className="text-sm text-slate-600">{error}</p>
-          <Button onClick={() => fetchInsights()} className="mt-4 bg-slate-900 hover:bg-slate-800 text-sm">Retry</Button>
+          <Button onClick={() => fetchInsights()} className="mt-4 bg-navy hover:bg-navy-700 text-sm">Retry</Button>
         </CardContent>
       </Card>
     );
@@ -130,14 +130,14 @@ const BillIntelligence = () => {
 
       {/* AI Summary Card */}
       {ai_insights?.summary && (
-        <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm" data-testid="ai-summary-card">
+        <Card className="border-teal-200 bg-gradient-to-br from-teal-50 to-teal-100/30 shadow-sm" data-testid="ai-summary-card">
           <CardContent className="p-5">
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Sparkles size={18} className="text-blue-600" />
+              <div className="w-9 h-9 rounded-lg bg-teal-100 flex items-center justify-center flex-shrink-0">
+                <Sparkles size={18} className="text-teal" />
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-blue-600 mb-1.5">AI Summary</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-teal mb-1.5">AI Summary</p>
                 <p className="text-sm text-slate-700 leading-relaxed" data-testid="ai-summary-text">{ai_insights.summary}</p>
               </div>
             </div>
@@ -154,7 +154,7 @@ const BillIntelligence = () => {
           label="Trend"
           value={analytics.trend_direction === 'increasing' ? 'Increasing' : analytics.trend_direction === 'decreasing' ? 'Decreasing' : 'Stable'}
           icon={analytics.trend_direction === 'increasing' ? ArrowUpRight : analytics.trend_direction === 'decreasing' ? ArrowDownRight : Minus}
-          iconColor={analytics.trend_direction === 'increasing' ? 'text-red-500' : analytics.trend_direction === 'decreasing' ? 'text-green-500' : 'text-blue-500'}
+          iconColor={analytics.trend_direction === 'increasing' ? 'text-red-500' : analytics.trend_direction === 'decreasing' ? 'text-green-500' : 'text-teal'}
           testId="stat-trend"
         />
       </div>

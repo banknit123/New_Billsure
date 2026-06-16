@@ -85,24 +85,24 @@ export default function Register() {
               />
               <label htmlFor="accept-terms" className="text-xs text-slate-500 leading-relaxed cursor-pointer">
                 I agree to the{' '}
-                <Link to="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Terms of Service</Link>
+                <Link to="/legal/terms" target="_blank" rel="noopener noreferrer" className="text-teal hover:underline">Terms of Service</Link>
                 {' '}and{' '}
-                <Link to="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Privacy Policy</Link>
+                <Link to="/legal/privacy" target="_blank" rel="noopener noreferrer" className="text-teal hover:underline">Privacy Policy</Link>
               </label>
             </div>
             <Button type="submit" disabled={loading || !acceptedTerms} data-testid="register-submit-btn"
-              className="w-full h-11 bg-slate-900 hover:bg-slate-800 text-sm font-medium disabled:opacity-50">
+              className="w-full h-11 bg-navy hover:bg-navy-700 text-sm font-medium disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Account'}
             </Button>
           </form>
 
           <p className="text-sm text-slate-500 text-center mt-6">
             Already have an account?{' '}
-            <Link to="/login" className="text-blue-600 hover:underline font-medium">Sign in</Link>
+            <Link to="/login" className="text-teal hover:underline font-medium">Sign in</Link>
           </p>
         </div>
       </div>
-      <div className="hidden lg:block lg:w-[45%] bg-slate-900 relative overflow-hidden">
+      <div className="hidden lg:block lg:w-[45%] bg-navy relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900" />
         <div className="relative z-10 h-full flex flex-col justify-center px-16">
           <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">Get Started</p>

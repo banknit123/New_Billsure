@@ -15,16 +15,16 @@ const TIER_STYLES = {
     icon: Zap,
   },
   standard: {
-    accent: 'border-blue-300 ring-2 ring-blue-100',
-    badge: 'bg-blue-100 text-blue-700',
-    btn: 'bg-blue-600 text-white hover:bg-blue-700',
+    accent: 'border-teal-300 ring-2 ring-blue-100',
+    badge: 'bg-teal-100 text-teal-700',
+    btn: 'bg-teal text-white hover:bg-teal-600',
     icon: Star,
     popular: true,
   },
   premium: {
-    accent: 'border-amber-300',
-    badge: 'bg-amber-100 text-amber-700',
-    btn: 'bg-amber-600 text-white hover:bg-amber-700',
+    accent: 'border-navy-300',
+    badge: 'bg-navy-100 text-navy-700',
+    btn: 'bg-navy text-white hover:bg-navy-700',
     icon: Crown,
   },
 };
@@ -93,7 +93,7 @@ const SubscriptionTiers = ({ user, refreshUser }) => {
             >
               {style.popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                  <span className="bg-teal text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
                     Most Popular
                   </span>
                 </div>

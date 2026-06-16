@@ -132,10 +132,10 @@ export default function LandingPage() {
       {/* ============ NAVIGATION ============ */}
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight cursor-pointer" style={{ fontFamily: 'Outfit, sans-serif' }}
+          <div className="flex items-center gap-2 cursor-pointer"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} data-testid="landing-logo">
-            EasyBillsPay
-          </h1>
+            <img src="/logo.jpg" alt="EasyBillsPay" className="h-9 rounded" />
+          </div>
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-6">
             <button onClick={() => scrollTo('how-it-works')} className="text-sm text-slate-500 hover:text-slate-900 transition-colors">How It Works</button>
@@ -148,7 +148,7 @@ export default function LandingPage() {
                 Log in
               </Button>
               <Button onClick={() => navigate('/register')} data-testid="landing-register-btn"
-                className="bg-slate-900 text-white hover:bg-slate-800 h-9 text-sm">
+                className="bg-navy text-white hover:bg-navy-700 h-9 text-sm">
                 Get Started <ArrowRight className="ml-1" size={14} />
               </Button>
             </div>
@@ -156,9 +156,9 @@ export default function LandingPage() {
           {/* Mobile Menu Toggle */}
           <button className="md:hidden p-2" onClick={() => setMobileMenu(!mobileMenu)} data-testid="mobile-menu-toggle">
             <div className="space-y-1.5">
-              <div className={`w-6 h-0.5 bg-slate-900 transition-all ${mobileMenu ? 'rotate-45 translate-y-2' : ''}`} />
-              <div className={`w-6 h-0.5 bg-slate-900 transition-all ${mobileMenu ? 'opacity-0' : ''}`} />
-              <div className={`w-6 h-0.5 bg-slate-900 transition-all ${mobileMenu ? '-rotate-45 -translate-y-2' : ''}`} />
+              <div className={`w-6 h-0.5 bg-navy transition-all ${mobileMenu ? 'rotate-45 translate-y-2' : ''}`} />
+              <div className={`w-6 h-0.5 bg-navy transition-all ${mobileMenu ? 'opacity-0' : ''}`} />
+              <div className={`w-6 h-0.5 bg-navy transition-all ${mobileMenu ? '-rotate-45 -translate-y-2' : ''}`} />
             </div>
           </button>
         </div>
@@ -171,7 +171,7 @@ export default function LandingPage() {
             <button onClick={() => scrollTo('faq')} className="block text-sm text-slate-600 py-2 w-full text-left">FAQ</button>
             <div className="flex gap-3 pt-2">
               <Button variant="outline" onClick={() => navigate('/login')} className="flex-1 border-slate-300 text-sm">Log in</Button>
-              <Button onClick={() => navigate('/register')} className="flex-1 bg-slate-900 text-white text-sm">Get Started</Button>
+              <Button onClick={() => navigate('/register')} className="flex-1 bg-navy text-white text-sm">Get Started</Button>
             </div>
           </div>
         )}
@@ -179,17 +179,17 @@ export default function LandingPage() {
 
       {/* ============ HERO SECTION ============ */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-blue-50/50 to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-b from-teal-50/30 to-transparent pointer-events-none" />
         <div className="max-w-6xl mx-auto px-6 py-16 md:py-24 lg:py-28 relative">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-full px-4 py-1.5 mb-6">
-                <Zap size={14} className="text-blue-600" />
-                <span className="text-xs font-semibold text-blue-700 tracking-wide uppercase">Smart Bill Management</span>
+              <div className="inline-flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-full px-4 py-1.5 mb-6">
+                <Zap size={14} className="text-teal" />
+                <span className="text-xs font-semibold text-teal-700 tracking-wide uppercase">Smart Bill Management</span>
               </div>
               <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-slate-900 tracking-tight leading-[1.1] mb-6" style={{ fontFamily: 'Outfit, sans-serif' }}>
                 One fixed payment.<br />
-                <span className="text-blue-600">All your bills</span> covered.
+                <span className="text-teal">All your bills</span> covered.
               </h2>
               <p className="text-base md:text-lg text-slate-500 leading-relaxed mb-8 max-w-lg">
                 Upload your bills, choose a fixed deduction plan, and we handle the rest.
@@ -197,7 +197,7 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 mb-8">
                 <Button size="lg" onClick={() => navigate('/register')} data-testid="hero-cta-btn"
-                  className="bg-slate-900 text-white hover:bg-slate-800 px-8 h-12 text-base shadow-lg shadow-slate-900/10">
+                  className="bg-navy text-white hover:bg-navy-700 px-8 h-12 text-base shadow-lg shadow-slate-900/10">
                   Start Managing Bills <ArrowRight className="ml-2" size={18} />
                 </Button>
                 <Button size="lg" variant="outline" onClick={() => navigate('/login')} data-testid="hero-login-btn"
@@ -231,8 +231,8 @@ export default function LandingPage() {
                 </div>
               </div>
               <div className="absolute -top-4 -right-4 bg-white rounded-xl shadow-lg border border-slate-100 px-4 py-3 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center">
-                  <TrendingDown size={20} className="text-blue-600" />
+                <div className="w-10 h-10 rounded-full bg-teal-50 flex items-center justify-center">
+                  <TrendingDown size={20} className="text-teal" />
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Late Fee Savings</p>
@@ -261,7 +261,7 @@ export default function LandingPage() {
               <p className="text-sm text-slate-500 mt-1">Late Fees Saved</p>
             </div>
             <div>
-              <p className="text-3xl md:text-4xl font-bold text-blue-600" style={{ fontFamily: 'Outfit' }}>4.9<Star size={20} className="inline ml-1 text-amber-400 fill-amber-400 -mt-1" /></p>
+              <p className="text-3xl md:text-4xl font-bold text-teal" style={{ fontFamily: 'Outfit' }}>4.9<Star size={20} className="inline ml-1 text-amber-400 fill-amber-400 -mt-1" /></p>
               <p className="text-sm text-slate-500 mt-1">Customer Rating</p>
             </div>
           </div>
@@ -272,7 +272,7 @@ export default function LandingPage() {
       <section id="how-it-works" className="py-16 md:py-24">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-14">
-            <p className="text-xs tracking-widest uppercase font-semibold text-blue-600 mb-3">How It Works</p>
+            <p className="text-xs tracking-widest uppercase font-semibold text-teal mb-3">How It Works</p>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
               Four simple steps to bill freedom
             </h2>
@@ -283,7 +283,7 @@ export default function LandingPage() {
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8">
             {[
-              { step: 1, icon: Upload, title: 'Upload Your Bills', desc: 'Upload a PDF bill or enter details manually. Our system auto-extracts provider, amount, due date, and account number.', color: 'bg-blue-50 text-blue-600' },
+              { step: 1, icon: Upload, title: 'Upload Your Bills', desc: 'Upload a PDF bill or enter details manually. Our system auto-extracts provider, amount, due date, and account number.', color: 'bg-teal-50 text-teal' },
               { step: 2, icon: BarChart3, title: 'Choose Your Plan', desc: 'We calculate 3 fixed deduction options — weekly, fortnightly, or monthly — each with an 8% safety buffer built in.', color: 'bg-emerald-50 text-emerald-600' },
               { step: 3, icon: Banknote, title: 'Fund Your Wallet', desc: 'Top up via Stripe using credit card, debit card, or BECS bank transfer. Secure, instant, and PCI compliant.', color: 'bg-violet-50 text-violet-600' },
               { step: 4, icon: CalendarCheck, title: 'We Pay On Time', desc: 'Sit back. We automatically deduct your fixed amount and pay every bill before the due date. You get notified at every step.', color: 'bg-amber-50 text-amber-600' },
@@ -315,7 +315,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
-              <p className="text-xs tracking-widest uppercase font-semibold text-blue-600 mb-3">All Bills, One Place</p>
+              <p className="text-xs tracking-widest uppercase font-semibold text-teal mb-3">All Bills, One Place</p>
               <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
                 Every bill at your fingertips
               </h2>
@@ -330,7 +330,7 @@ export default function LandingPage() {
                   { icon: Eye, label: 'Track every bill' },
                 ].map((f, i) => (
                   <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-100">
-                    <f.icon size={18} className="text-blue-600 shrink-0" />
+                    <f.icon size={18} className="text-teal shrink-0" />
                     <span className="text-sm font-medium text-slate-700">{f.label}</span>
                   </div>
                 ))}
@@ -370,11 +370,11 @@ export default function LandingPage() {
                     <p className="text-sm text-slate-500">{p.desc}</p>
                   </div>
                 ))}
-                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
-                  <Shield size={20} className="text-blue-600 shrink-0 mt-0.5" />
+                <div className="bg-teal-50 border border-blue-100 rounded-xl p-4 flex items-start gap-3">
+                  <Shield size={20} className="text-teal shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm font-semibold text-blue-900">8% Safety Buffer Included</p>
-                    <p className="text-xs text-blue-700 mt-0.5">Every plan includes an 8% buffer so you're always ahead of your bills. Any excess stays as wallet credit.</p>
+                    <p className="text-xs text-teal-700 mt-0.5">Every plan includes an 8% buffer so you're always ahead of your bills. Any excess stays as wallet credit.</p>
                   </div>
                 </div>
               </div>
@@ -444,7 +444,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
             <div>
-              <p className="text-xs tracking-widest uppercase font-semibold text-blue-600 mb-3">Flexible Payments</p>
+              <p className="text-xs tracking-widest uppercase font-semibold text-teal mb-3">Flexible Payments</p>
               <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
                 Pay your way
               </h2>
@@ -459,8 +459,8 @@ export default function LandingPage() {
                   { icon: Shield, title: 'PCI DSS Compliant', desc: 'Your raw card and bank numbers never touch our servers. Stripe handles all sensitive payment data.' },
                 ].map((m, i) => (
                   <div key={i} className="flex gap-4 p-4 rounded-xl bg-white border border-slate-200 hover:shadow-sm transition-shadow">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
-                      <m.icon size={20} className="text-blue-600" />
+                    <div className="w-10 h-10 rounded-lg bg-teal-50 flex items-center justify-center shrink-0">
+                      <m.icon size={20} className="text-teal" />
                     </div>
                     <div>
                       <h4 className="font-semibold text-slate-900 text-sm" style={{ fontFamily: 'Outfit' }}>{m.title}</h4>
@@ -485,7 +485,7 @@ export default function LandingPage() {
       </section>
 
       {/* ============ SECURITY SECTION ============ */}
-      <section id="security" className="py-16 md:py-24 bg-slate-900 text-white">
+      <section id="security" className="py-16 md:py-24 bg-navy text-white">
         <div className="max-w-6xl mx-auto px-6">
           <div className="text-center mb-14">
             <p className="text-xs tracking-widest uppercase font-semibold text-blue-400 mb-3">World-Class Security</p>
@@ -520,7 +520,7 @@ export default function LandingPage() {
               },
             ].map((s, i) => (
               <div key={i} className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 hover:border-slate-600 transition-colors">
-                <div className="w-12 h-12 rounded-lg bg-blue-600/10 flex items-center justify-center mb-4">
+                <div className="w-12 h-12 rounded-lg bg-teal/10 flex items-center justify-center mb-4">
                   <s.icon size={24} className="text-blue-400" />
                 </div>
                 <h3 className="font-semibold text-white mb-2" style={{ fontFamily: 'Outfit' }}>{s.title}</h3>
@@ -563,7 +563,7 @@ export default function LandingPage() {
       <section id="faq" className="py-16 md:py-24 bg-white border-y border-slate-200">
         <div className="max-w-3xl mx-auto px-6">
           <div className="text-center mb-14">
-            <p className="text-xs tracking-widest uppercase font-semibold text-blue-600 mb-3">FAQ</p>
+            <p className="text-xs tracking-widest uppercase font-semibold text-teal mb-3">FAQ</p>
             <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
               Frequently asked questions
             </h2>
@@ -574,7 +574,7 @@ export default function LandingPage() {
           <Accordion type="single" collapsible className="w-full" data-testid="faq-accordion">
             {FAQ_DATA.map((faq, i) => (
               <AccordionItem key={i} value={`faq-${i}`} className="border-slate-200">
-                <AccordionTrigger className="text-left text-base font-medium text-slate-900 hover:no-underline hover:text-blue-600 py-5" data-testid={`faq-trigger-${i}`}>
+                <AccordionTrigger className="text-left text-base font-medium text-slate-900 hover:no-underline hover:text-teal py-5" data-testid={`faq-trigger-${i}`}>
                   {faq.q}
                 </AccordionTrigger>
                 <AccordionContent className="text-sm text-slate-500 leading-relaxed pb-5" data-testid={`faq-content-${i}`}>
@@ -589,7 +589,7 @@ export default function LandingPage() {
       {/* ============ CTA BANNER ============ */}
       <section className="py-16 md:py-24">
         <div className="max-w-6xl mx-auto px-6">
-          <div className="bg-slate-900 rounded-2xl p-8 md:p-14 text-center relative overflow-hidden">
+          <div className="bg-navy rounded-2xl p-8 md:p-14 text-center relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-transparent pointer-events-none" />
             <div className="relative">
               <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
@@ -601,11 +601,11 @@ export default function LandingPage() {
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button size="lg" onClick={() => navigate('/register')} data-testid="cta-register-btn"
-                  className="bg-blue-600 text-white hover:bg-blue-700 px-8 h-12 text-base shadow-lg shadow-blue-600/20">
+                  className="bg-teal text-white hover:bg-teal-600 px-8 h-12 text-base shadow-lg shadow-blue-600/20">
                   Get Started Free <ArrowRight className="ml-2" size={18} />
                 </Button>
                 <Button size="lg" variant="outline" onClick={() => navigate('/login')}
-                  className="border-slate-600 text-slate-300 hover:bg-slate-800 hover:text-white h-12 text-base">
+                  className="border-slate-600 text-slate-300 hover:bg-navy-700 hover:text-white h-12 text-base">
                   Log in to your account
                 </Button>
               </div>
@@ -634,10 +634,10 @@ export default function LandingPage() {
             <div>
               <h4 className="text-sm font-semibold text-slate-900 mb-3 uppercase tracking-wide">Product</h4>
               <ul className="space-y-2">
-                <li><button onClick={() => scrollTo('how-it-works')} className="text-sm text-slate-500 hover:text-blue-600 transition-colors">How It Works</button></li>
-                <li><button onClick={() => scrollTo('features')} className="text-sm text-slate-500 hover:text-blue-600 transition-colors">Features</button></li>
-                <li><button onClick={() => scrollTo('security')} className="text-sm text-slate-500 hover:text-blue-600 transition-colors">Security</button></li>
-                <li><button onClick={() => scrollTo('faq')} className="text-sm text-slate-500 hover:text-blue-600 transition-colors">FAQ</button></li>
+                <li><button onClick={() => scrollTo('how-it-works')} className="text-sm text-slate-500 hover:text-teal transition-colors">How It Works</button></li>
+                <li><button onClick={() => scrollTo('features')} className="text-sm text-slate-500 hover:text-teal transition-colors">Features</button></li>
+                <li><button onClick={() => scrollTo('security')} className="text-sm text-slate-500 hover:text-teal transition-colors">Security</button></li>
+                <li><button onClick={() => scrollTo('faq')} className="text-sm text-slate-500 hover:text-teal transition-colors">FAQ</button></li>
               </ul>
             </div>
             {/* Bill Types */}

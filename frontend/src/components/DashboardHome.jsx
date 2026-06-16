@@ -101,7 +101,7 @@ const DashboardHome = ({ user, refreshUser }) => {
               )}
             </div>
             <Button onClick={() => navigate('/dashboard/payment-plan')} data-testid="go-to-plan-btn"
-              className="bg-slate-900 hover:bg-slate-800 text-sm">
+              className="bg-navy hover:bg-navy-700 text-sm">
               {plan ? 'Manage Plan' : 'Set Up Plan'} <ArrowRight className="ml-2" size={16} />
             </Button>
           </div>
@@ -113,15 +113,15 @@ const DashboardHome = ({ user, refreshUser }) => {
         <CardContent className="p-0">
           <div className="p-5 pb-0 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Sparkles size={16} className="text-blue-600" />
+              <div className="w-8 h-8 rounded-lg bg-teal-50 flex items-center justify-center">
+                <Sparkles size={16} className="text-teal" />
               </div>
               <div>
                 <p className="text-xs tracking-widest uppercase font-medium text-slate-400">Bill Intelligence</p>
               </div>
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard/insights')}
-              className="text-blue-600 text-xs" data-testid="go-to-insights-btn">
+              className="text-teal text-xs" data-testid="go-to-insights-btn">
               View All <ArrowRight size={14} className="ml-1" />
             </Button>
           </div>
@@ -145,7 +145,7 @@ const DashboardHome = ({ user, refreshUser }) => {
                   </span>
                 )}
                 {insights.analytics.trend_direction === 'stable' && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-xs font-medium text-teal bg-teal-50 px-2 py-1 rounded-full">
                     <Minus size={12} /> Spending stable
                   </span>
                 )}
@@ -214,7 +214,7 @@ const DashboardHome = ({ user, refreshUser }) => {
             <div className="flex items-center justify-between mb-4">
               <p className="text-xs tracking-widest uppercase font-medium text-slate-400">Upcoming (30 days)</p>
               <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard/bills')}
-                className="text-blue-600 text-xs" data-testid="view-all-bills-btn">
+                className="text-teal text-xs" data-testid="view-all-bills-btn">
                 View All
               </Button>
             </div>
@@ -264,7 +264,7 @@ const DashboardHome = ({ user, refreshUser }) => {
 
 const StatCard = ({ icon: Icon, label, value, sub, color }) => {
   const colorMap = {
-    blue: 'bg-blue-50 text-blue-600',
+    blue: 'bg-teal-50 text-teal',
     amber: 'bg-amber-50 text-amber-600',
     green: 'bg-green-50 text-green-600',
     slate: 'bg-slate-100 text-slate-600',
