@@ -43,12 +43,12 @@ function useCountUp(target, duration = 2000, startOnView = true) {
 
 const FAQ_DATA = [
   {
-    q: "How does EasyBillsPay work?",
+    q: "How does BillSure work?",
     a: "Simply upload your bills (electricity, gas, internet, insurance — any recurring bill) via PDF or manual entry. We calculate three fixed deduction options (weekly, fortnightly, or monthly) with an 8% safety buffer. Choose a plan, fund your wallet via Stripe, and we automatically pay your bills on time."
   },
   {
     q: "What types of bills can I manage?",
-    a: "You can manage any recurring bill — electricity, gas, water, internet, phone, insurance, council rates, streaming subscriptions, rent, and more. If it has a due date and an amount, EasyBillsPay can handle it."
+    a: "You can manage any recurring bill — electricity, gas, water, internet, phone, insurance, council rates, streaming subscriptions, rent, and more. If it has a due date and an amount, BillSure can handle it."
   },
   {
     q: "How do I upload my bills?",
@@ -84,11 +84,11 @@ const FAQ_DATA = [
   },
   {
     q: "Is there a mobile app?",
-    a: "EasyBillsPay is a fully responsive web application that works beautifully on any device — desktop, tablet, or mobile. Simply open it in your browser. No download required."
+    a: "BillSure is a fully responsive web application that works beautifully on any device — desktop, tablet, or mobile. Simply open it in your browser. No download required."
   },
   {
     q: "Who can I contact for support?",
-    a: "You can reach our support team at support@easybillspay.com.au. We're an Australian-owned company and pride ourselves on fast, helpful support for all our customers."
+    a: "You can reach our support team at support@billsure.com.au. We're an Australian-owned company and pride ourselves on fast, helpful support for all our customers."
   }
 ];
 
@@ -96,13 +96,13 @@ const TESTIMONIALS = [
   {
     name: "Sarah Mitchell",
     role: "Small Business Owner, Sydney",
-    text: "I used to spend hours every month sorting through bills and worrying about due dates. EasyBillsPay changed everything — I set it up once and now everything runs on autopilot. The safety buffer is genius.",
+    text: "I used to spend hours every month sorting through bills and worrying about due dates. BillSure changed everything — I set it up once and now everything runs on autopilot. The safety buffer is genius.",
     rating: 5
   },
   {
     name: "James Cooper",
     role: "Property Manager, Melbourne",
-    text: "Managing bills across multiple rental properties was a nightmare. Now I upload each bill as a PDF, and EasyBillsPay extracts everything automatically. The admin dashboard gives me full visibility. Highly recommend.",
+    text: "Managing bills across multiple rental properties was a nightmare. Now I upload each bill as a PDF, and BillSure extracts everything automatically. The admin dashboard gives me full visibility. Highly recommend.",
     rating: 5
   },
   {
@@ -134,7 +134,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} data-testid="landing-logo">
-            <img src="/logo.jpg" alt="EasyBillsPay" className="h-9 rounded" />
+            <img src="/logo.png" alt="BillSure" className="h-9 rounded" />
           </div>
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-6">
@@ -148,7 +148,7 @@ export default function LandingPage() {
                 Log in
               </Button>
               <Button onClick={() => navigate('/register')} data-testid="landing-register-btn"
-                className="bg-navy text-white hover:bg-navy-700 h-9 text-sm">
+                className="bg-teal text-white hover:bg-teal-600 h-9 text-sm">
                 Get Started <ArrowRight className="ml-1" size={14} />
               </Button>
             </div>
@@ -188,17 +188,17 @@ export default function LandingPage() {
                 <span className="text-xs font-semibold text-teal-700 tracking-wide uppercase">Smart Bill Management</span>
               </div>
               <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-slate-900 tracking-tight leading-[1.1] mb-6" style={{ fontFamily: 'Outfit, sans-serif' }}>
-                One fixed payment.<br />
-                <span className="text-teal">All your bills</span> covered.
+                Never be surprised<br />
+                <span className="text-teal">by a bill</span> again.
               </h2>
               <p className="text-base md:text-lg text-slate-500 leading-relaxed mb-8 max-w-lg">
-                Upload your bills, choose a fixed deduction plan, and we handle the rest.
-                No more missed payments. No more late fees. No more stress.
+                Plan, smooth, and pay — all from one place. We predict your bills,
+                equalise your payments, and handle the rest automatically.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 mb-8">
                 <Button size="lg" onClick={() => navigate('/register')} data-testid="hero-cta-btn"
-                  className="bg-navy text-white hover:bg-navy-700 px-8 h-12 text-base shadow-lg shadow-slate-900/10">
-                  Start Managing Bills <ArrowRight className="ml-2" size={18} />
+                  className="bg-teal text-white hover:bg-teal-600 px-8 h-12 text-base shadow-lg shadow-teal/20">
+                  Get Started <ArrowRight className="ml-2" size={18} />
                 </Button>
                 <Button size="lg" variant="outline" onClick={() => navigate('/login')} data-testid="hero-login-btn"
                   className="border-slate-300 text-slate-700 h-12 text-base">
@@ -516,7 +516,7 @@ export default function LandingPage() {
               {
                 icon: Globe,
                 title: 'Australian Owned',
-                desc: 'EasyBillsPay is an Australian-owned company, built and operated for Australians. Your data stays protected under Australian privacy laws.',
+                desc: 'BillSure is an Australian-owned company, built and operated for Australians. Your data stays protected under Australian privacy laws.',
               },
             ].map((s, i) => (
               <div key={i} className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-xl p-6 hover:border-slate-600 transition-colors">
@@ -568,7 +568,7 @@ export default function LandingPage() {
               Frequently asked questions
             </h2>
             <p className="text-base text-slate-500">
-              Everything you need to know about EasyBillsPay.
+              Everything you need to know about BillSure.
             </p>
           </div>
           <Accordion type="single" collapsible className="w-full" data-testid="faq-accordion">
@@ -590,7 +590,7 @@ export default function LandingPage() {
       <section className="py-16 md:py-24">
         <div className="max-w-6xl mx-auto px-6">
           <div className="bg-navy rounded-2xl p-8 md:p-14 text-center relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-br from-teal/10 to-transparent pointer-events-none" />
             <div className="relative">
               <h2 className="text-3xl sm:text-4xl font-bold text-white tracking-tight mb-4" style={{ fontFamily: 'Outfit' }}>
                 Ready to take control of your bills?
@@ -621,7 +621,7 @@ export default function LandingPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
             {/* Brand */}
             <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-3" style={{ fontFamily: 'Outfit' }}>EasyBillsPay</h3>
+              <h3 className="text-lg font-bold text-slate-900 mb-3" style={{ fontFamily: 'Outfit' }}>BillSure</h3>
               <p className="text-sm text-slate-500 leading-relaxed mb-4">
                 Australia's smart bill management platform. One fixed payment covers all your bills.
               </p>
@@ -655,7 +655,7 @@ export default function LandingPage() {
               <h4 className="text-sm font-semibold text-slate-900 mb-3 uppercase tracking-wide">Contact</h4>
               <ul className="space-y-2">
                 <li className="flex items-center gap-2 text-sm text-slate-500">
-                  <Mail size={14} className="shrink-0" /> support@easybillspay.com.au
+                  <Mail size={14} className="shrink-0" /> support@billsure.com.au
                 </li>
                 <li className="flex items-center gap-2 text-sm text-slate-500">
                   <MapPin size={14} className="shrink-0" /> Sydney, Australia
@@ -665,7 +665,7 @@ export default function LandingPage() {
           </div>
           <div className="border-t border-slate-200 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-xs text-slate-400">
-              &copy; {new Date().getFullYear()} EasyBillsPay. All rights reserved. Australian owned & operated.
+              &copy; {new Date().getFullYear()} BillSure. All rights reserved. Australian owned & operated.
             </p>
             <div className="flex gap-4 text-xs text-slate-400">
               <span onClick={() => navigate('/legal/privacy')} className="hover:text-slate-600 cursor-pointer transition-colors" data-testid="footer-privacy-link">Privacy Policy</span>

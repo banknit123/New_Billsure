@@ -1,7 +1,7 @@
-# EasyBillsPay - Product Requirements Document
+# BillSure - Product Requirements Document
 
 ## Original Problem Statement
-Build www.easybillspay.com.au - a utility bill management and payment portal where customers upload bills, choose a fixed deduction plan (weekly/fortnightly/monthly with 8% safety buffer), and the company auto-pays their bills.
+Build www.billsure.com.au - a utility bill management and payment portal where customers upload bills, choose a fixed deduction plan (weekly/fortnightly/monthly with 8% safety buffer), and the company auto-pays their bills.
 
 ## Architecture
 - **Frontend**: React.js, TailwindCSS, Shadcn UI, Recharts, Lucide-React
@@ -12,7 +12,7 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 - **Payments**: Stripe Checkout (Card + BECS Direct Debit ready), Admin BPAY/bank payments
 - **Bill Extraction**: pdfplumber (text PDFs) + GPT-4o Vision (images/scanned PDFs) + Accurassi API
 - **Encryption**: Fernet (AES-128-CBC)
-- **Domain**: www.easybillspay.com.au
+- **Domain**: www.billsure.com.au
 
 ## All Features Implemented
 1. Landing Page - Hero, stats, How It Works, Features, Security, FAQ, Testimonials, CTA, Footer
@@ -56,8 +56,8 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
     - DEPLOYMENT.md with branch strategy and upgrade checklist
 
 ## Design
-- **Color Palette**: Navy (#1A344B) + Teal (#17B5A7) + White
-- **Logo**: /app/frontend/public/logo.jpg (EasyBillsPay with teal dollar icon)
+- **Color Palette**: Navy (#002855) + Teal (#00C4A6) + White
+- **Logo**: /app/frontend/public/logo.png (BillSure with teal dollar icon)
 - **Fonts**: Outfit (headings), Manrope (body)
 - **UI Library**: Shadcn UI + TailwindCSS + Recharts
 

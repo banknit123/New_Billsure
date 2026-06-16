@@ -1,4 +1,4 @@
-"""EasyBillsPay — Utility functions: auth, encryption, email
+"""BillSure — Utility functions: auth, encryption, email
 Now using Supabase Auth for authentication with custom JWT fallback.
 """
 import os
@@ -120,7 +120,7 @@ def decrypt_field(value: str) -> str:
 
 # Email
 RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@easybillspay.com.au')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@billsure.com.au')
 
 if RESEND_API_KEY:
     import resend

@@ -342,7 +342,7 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
                     <label htmlFor="becs-agree" className="text-xs text-blue-800 leading-relaxed cursor-pointer">
                       I have read and agree to the{' '}
                       <Link to="/legal/becs" target="_blank" className="font-semibold underline hover:text-teal">BECS Direct Debit Service Agreement</Link>
-                      {' '}and authorise EasyBillsPay to debit my account.
+                      {' '}and authorise BillSure to debit my account.
                     </label>
                   </div>
                 </div>

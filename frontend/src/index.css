@@ -24,12 +24,12 @@
     --input: 200 25% 87%;
     --ring: 174 40% 40%;
     --radius: 0.5rem;
-    --navy: #1A344B;
-    --navy-light: #243d56;
-    --navy-dark: #0f2133;
-    --teal: #17B5A7;
-    --teal-light: #4dd9cb;
-    --teal-dark: #0f8a7e;
+    --navy: #002855;
+    --navy-light: #0a3a6b;
+    --navy-dark: #001a3a;
+    --teal: #00C4A6;
+    --teal-light: #33d4bc;
+    --teal-dark: #009a83;
   }
 }
 

@@ -1,5 +1,5 @@
 """
-EasyBillsPay v2 — Billing Smoothing Engine
+BillSure v2 — Billing Smoothing Engine
 ==========================================
 Core engine for annual bill prediction, monthly equalised payments,
 excess/deficit balancing, and subscription tier management.

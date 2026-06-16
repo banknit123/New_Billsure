@@ -195,12 +195,12 @@ const ForecastDashboard = ({ user }) => {
               <AreaChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <defs>
                   <linearGradient id="gradTraditional" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1A344B" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#1A344B" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#002855" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#002855" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="gradSmoothed" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#17B5A7" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="#17B5A7" stopOpacity={0} />
+                    <stop offset="5%" stopColor="#00C4A6" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#00C4A6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -211,8 +211,8 @@ const ForecastDashboard = ({ user }) => {
                   formatter={(v, name) => [`$${v.toFixed(2)}`, name]}
                 />
                 <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
-                <Area type="monotone" dataKey="traditional" name="Traditional" stroke="#1A344B" strokeWidth={2} fill="url(#gradTraditional)" />
-                <Area type="monotone" dataKey="smoothed" name="Smoothed" stroke="#17B5A7" strokeWidth={2} fill="url(#gradSmoothed)" strokeDasharray="6 3" />
+                <Area type="monotone" dataKey="traditional" name="Traditional" stroke="#002855" strokeWidth={2} fill="url(#gradTraditional)" />
+                <Area type="monotone" dataKey="smoothed" name="Smoothed" stroke="#00C4A6" strokeWidth={2} fill="url(#gradSmoothed)" strokeDasharray="6 3" />
               </AreaChart>
             </ResponsiveContainer>
           </CardContent>

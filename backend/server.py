@@ -587,7 +587,7 @@ def build_bill_email(notification_type: str, user_name: str, bill_provider: str,
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc; padding: 24px;">
       <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0;">
         <div style="background: #0f172a; padding: 20px 24px;">
-          <h1 style="color: white; font-size: 20px; margin: 0;">EasyBillsPay</h1>
+          <h1 style="color: white; font-size: 20px; margin: 0;">BillSure</h1>
         </div>
         <div style="padding: 24px;">
           <div style="display: inline-block; background: {color}15; color: {color}; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">{label}</div>
@@ -607,10 +607,10 @@ def build_bill_email(notification_type: str, user_name: str, bill_provider: str,
               <td style="padding: 10px 0; color: #0f172a; font-size: 14px; text-align: right;">{due_date}</td>
             </tr>
           </table>
-          <a href="https://www.easybillspay.com.au/dashboard" style="display: block; text-align: center; background: #0f172a; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">View Dashboard</a>
+          <a href="https://www.billsure.com.au/dashboard" style="display: block; text-align: center; background: #0f172a; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">View Dashboard</a>
         </div>
         <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
-          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">EasyBillsPay &middot; www.easybillspay.com.au &middot; Australian Owned</p>
+          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">BillSure &middot; www.billsure.com.au &middot; Australian Owned</p>
         </div>
       </div>
     </div>"""
@@ -622,7 +622,7 @@ def build_low_balance_email(user_name: str, wallet: float, pending_total: float)
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc; padding: 24px;">
       <div style="background: white; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0;">
         <div style="background: #0f172a; padding: 20px 24px;">
-          <h1 style="color: white; font-size: 20px; margin: 0;">EasyBillsPay</h1>
+          <h1 style="color: white; font-size: 20px; margin: 0;">BillSure</h1>
         </div>
         <div style="padding: 24px;">
           <div style="display: inline-block; background: #D9770615; color: #D97706; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; letter-spacing: 1px; margin-bottom: 16px;">LOW BALANCE</div>
@@ -638,10 +638,10 @@ def build_low_balance_email(user_name: str, wallet: float, pending_total: float)
               <td style="padding: 10px 0; color: #0f172a; font-size: 14px; font-weight: 600; text-align: right;">${pending_total:.2f}</td>
             </tr>
           </table>
-          <a href="https://www.easybillspay.com.au/dashboard/payment-plan" style="display: block; text-align: center; background: #2563EB; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">Top Up Wallet</a>
+          <a href="https://www.billsure.com.au/dashboard/payment-plan" style="display: block; text-align: center; background: #2563EB; color: white; padding: 12px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; margin-top: 20px;">Top Up Wallet</a>
         </div>
         <div style="padding: 16px 24px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
-          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">EasyBillsPay &middot; www.easybillspay.com.au &middot; Australian Owned</p>
+          <p style="color: #94a3b8; font-size: 11px; margin: 0; text-align: center;">BillSure &middot; www.billsure.com.au &middot; Australian Owned</p>
         </div>
       </div>
     </div>"""
@@ -2233,7 +2233,7 @@ async def generate_notifications():
                             bill.get("due_date", "") if bill else "",
                             n.get("message", "")
                         )
-                    await send_email(user["email"], n.get("title", "EasyBillsPay Notification"), html)
+                    await send_email(user["email"], n.get("title", "BillSure Notification"), html)
                 await sdb.update_one("notifications", {"id": n["id"]}, {"$set": {"email_sent": True}})
 
         except Exception as e:
@@ -2343,7 +2343,7 @@ async def export_outstanding_pdf(admin_user: dict = Depends(get_admin_user)):
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
 
     elements = []
-    elements.append(Paragraph("EasyBillsPay - Outstanding Bills Report", title_style))
+    elements.append(Paragraph("BillSure - Outstanding Bills Report", title_style))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
 
     total = sum(b.get("amount", 0) for b in all_pending)
@@ -2403,7 +2403,7 @@ async def export_financial_pdf(admin_user: dict = Depends(get_admin_user)):
     subtitle_style = ParagraphStyle('Subtitle', parent=styles['Normal'], fontSize=10, textColor=colors.grey, spaceAfter=20)
 
     elements = []
-    elements.append(Paragraph("EasyBillsPay - Financial Overview Report", title_style))
+    elements.append(Paragraph("BillSure - Financial Overview Report", title_style))
     elements.append(Paragraph(f"Generated: {datetime.now().strftime('%d %B %Y %H:%M')}", subtitle_style))
 
     # KPI Table

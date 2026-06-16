@@ -70,14 +70,14 @@ export default function Login() {
         </div>
       </div>
       <div className="hidden lg:block lg:w-[45%] bg-navy relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900" />
+        <div className="absolute inset-0 bg-gradient-to-br from-[#002855] via-[#003470] to-[#002040]" />
         <div className="relative z-10 h-full flex flex-col justify-center px-16">
-          <p className="text-xs tracking-widest uppercase text-blue-400 mb-3">EasyBillsPay</p>
+          <p className="text-xs tracking-widest uppercase text-teal mb-3">BillSure</p>
           <h2 className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            One fixed payment covers all your bills
+            Never be surprised by a bill again
           </h2>
           <p className="text-slate-400 text-sm leading-relaxed">
-            Upload your bills, select a plan, and let us handle the rest. Simple, predictable, reliable.
+            Plan, smooth, and pay — all from one place. Simple, predictable, reliable.
           </p>
         </div>
       </div>

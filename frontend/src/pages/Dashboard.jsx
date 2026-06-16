@@ -50,7 +50,7 @@ export default function Dashboard() {
         lg:translate-x-0
       `}>
         <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
-          <img src="/logo.jpg" alt="EasyBillsPay" className="h-8 rounded" />
+          <img src="/logo.png" alt="BillSure" className="h-8 rounded" />
           <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>
             <X size={20} />
           </button>

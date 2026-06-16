@@ -11,7 +11,7 @@ const SECTIONS = {
     content: [
       {
         heading: '1. About This Policy',
-        text: `EasyBillsPay Pty Ltd (ABN pending) ("we", "our", "us") operates the website www.easybillspay.com.au and the EasyBillsPay bill management platform. This Privacy Policy explains how we collect, use, disclose, and protect your personal information in accordance with the Privacy Act 1988 (Cth) and the Australian Privacy Principles (APPs).`
+        text: `BillSure Pty Ltd (ABN pending) ("we", "our", "us") operates the website www.billsure.com.au and the BillSure bill management platform. This Privacy Policy explains how we collect, use, disclose, and protect your personal information in accordance with the Privacy Act 1988 (Cth) and the Australian Privacy Principles (APPs).`
       },
       {
         heading: '2. Information We Collect',
@@ -75,7 +75,7 @@ We do NOT sell your personal information to third parties. We do NOT share your 
 • Complain about a breach of the APPs
 • Request deletion of your account and associated data
 
-To exercise these rights, contact us at privacy@easybillspay.com.au. We will respond within 30 days.`
+To exercise these rights, contact us at privacy@billsure.com.au. We will respond within 30 days.`
       },
       {
         heading: '9. Data Retention',
@@ -102,8 +102,8 @@ To exercise these rights, contact us at privacy@easybillspay.com.au. We will res
       {
         heading: '13. Contact Us',
         text: `If you have questions about this Privacy Policy or wish to make a complaint:
-• Email: privacy@easybillspay.com.au
-• Website: www.easybillspay.com.au
+• Email: privacy@billsure.com.au
+• Website: www.billsure.com.au
 • Office of the Australian Information Commissioner: www.oaic.gov.au (if you are unsatisfied with our response)`
       }
     ]
@@ -115,14 +115,14 @@ To exercise these rights, contact us at privacy@easybillspay.com.au. We will res
     content: [
       {
         heading: '1. Acceptance of Terms',
-        text: `By accessing or using the EasyBillsPay platform (www.easybillspay.com.au), you agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the service. These Terms constitute a legally binding agreement between you and EasyBillsPay Pty Ltd.`
+        text: `By accessing or using the BillSure platform (www.billsure.com.au), you agree to be bound by these Terms of Service ("Terms"). If you do not agree, do not use the service. These Terms constitute a legally binding agreement between you and BillSure Pty Ltd.`
       },
       {
         heading: '2. Service Description',
-        text: `EasyBillsPay provides a bill management and payment service. We:
+        text: `BillSure provides a bill management and payment service. We:
 • Allow you to upload and manage your household and business bills
 • Calculate fixed deduction payment plans (weekly, fortnightly, or monthly) with an 8% safety buffer
-• Collect funds into your EasyBillsPay wallet via Stripe
+• Collect funds into your BillSure wallet via Stripe
 • Pay your bills on your behalf using BPAY or direct bank transfer before their due dates
 • Send notifications about upcoming, overdue, and paid bills
 
@@ -150,7 +150,7 @@ We are not liable for late payments caused by incorrect information you provided
       {
         heading: '5. Payment Plans & Wallet',
         text: `• Payment plans calculate a fixed deduction based on your total pending bills plus an 8% safety buffer
-• Funds are collected into your EasyBillsPay wallet via Stripe
+• Funds are collected into your BillSure wallet via Stripe
 • We deduct the fixed amount from your wallet on your chosen schedule
 • Bills are paid from your wallet balance when due
 • If your wallet balance is insufficient, bills will remain pending — we will notify you
@@ -161,7 +161,7 @@ We are not liable for late payments caused by incorrect information you provided
         heading: '6. Payments & Fees',
         text: `• Standard payment processing (credit card, debit card) is handled by Stripe
 • Standard Stripe processing fees may apply (see Stripe's fee schedule)
-• EasyBillsPay does not charge additional platform fees at this time
+• BillSure does not charge additional platform fees at this time
 • We reserve the right to introduce fees with 30 days' notice
 • Refunds of wallet balance are available upon account closure, minus any pending bill obligations`
       },
@@ -187,7 +187,7 @@ We are not liable for late payments caused by incorrect information you provided
       },
       {
         heading: '10. Termination',
-        text: `• You may close your account at any time by contacting support@easybillspay.com.au
+        text: `• You may close your account at any time by contacting support@billsure.com.au
 • Upon closure, any remaining wallet balance (minus pending bills) will be refunded within 14 business days
 • We may terminate your account for violation of these Terms with written notice
 • Sections relating to liability, indemnity, and dispute resolution survive termination`
@@ -195,7 +195,7 @@ We are not liable for late payments caused by incorrect information you provided
       {
         heading: '11. Dispute Resolution',
         text: `If you have a dispute with us:
-1. Contact us at support@easybillspay.com.au — we aim to resolve issues within 5 business days
+1. Contact us at support@billsure.com.au — we aim to resolve issues within 5 business days
 2. If unresolved, you may lodge a complaint with the Australian Financial Complaints Authority (AFCA) if applicable, or your relevant state consumer affairs body
 3. These Terms are governed by the laws of New South Wales, Australia`
       },
@@ -205,9 +205,9 @@ We are not liable for late payments caused by incorrect information you provided
       },
       {
         heading: '13. Contact',
-        text: `EasyBillsPay Pty Ltd
-Email: support@easybillspay.com.au
-Website: www.easybillspay.com.au
+        text: `BillSure Pty Ltd
+Email: support@billsure.com.au
+Website: www.billsure.com.au
 Location: Sydney, NSW, Australia`
       }
     ]
@@ -225,7 +225,7 @@ Location: Sydney, NSW, Australia`
 "Debit Day" means the day your payment plan deduction is scheduled.
 "Debit Payment" means a particular transaction where a debit is made.
 "Direct Debit Request (DDR)" means your authorisation for us to debit your account via BECS.
-"Us/We/Our" means EasyBillsPay Pty Ltd.
+"Us/We/Our" means BillSure Pty Ltd.
 "You/Your" means the account holder who has signed the DDR.`
       },
       {
@@ -243,7 +243,7 @@ Location: Sydney, NSW, Australia`
       {
         heading: '4. Changes & Disputes',
         text: `If you believe a debit has been initiated incorrectly:
-• Contact us at support@easybillspay.com.au and we will investigate within 5 business days
+• Contact us at support@billsure.com.au and we will investigate within 5 business days
 • You may also contact your bank to dispute the debit under the BECS rules
 • You can request a stop or cancellation at any time by contacting us or your bank
 
@@ -293,7 +293,7 @@ export default function LegalPage() {
       <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-md">
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
           <button onClick={() => navigate('/')} className="text-xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            EasyBillsPay
+            BillSure
           </button>
           <Button variant="outline" onClick={() => navigate(-1)} className="border-slate-300 text-sm h-9">
             <ArrowLeft size={14} className="mr-1.5" /> Back
@@ -350,10 +350,10 @@ export default function LegalPage() {
         {/* Footer */}
         <div className="mt-12 pt-8 border-t border-slate-200 text-center">
           <p className="text-xs text-slate-400">
-            &copy; {new Date().getFullYear()} EasyBillsPay Pty Ltd. All rights reserved. Australian owned & operated.
+            &copy; {new Date().getFullYear()} BillSure Pty Ltd. All rights reserved. Australian owned & operated.
           </p>
           <p className="text-xs text-slate-400 mt-1">
-            Questions? Contact <a href="mailto:support@easybillspay.com.au" className="text-blue-600 hover:underline">support@easybillspay.com.au</a>
+            Questions? Contact <a href="mailto:support@billsure.com.au" className="text-blue-600 hover:underline">support@billsure.com.au</a>
           </p>
         </div>
       </main>

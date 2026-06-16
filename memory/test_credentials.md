@@ -13,11 +13,13 @@
 - Password: Test123!
 
 ## Notes
-- Brand name: EasyBillsPay (www.easybillspay.com.au)
-- Database: Supabase Postgres (migrated from MongoDB)
+- Brand name: BillSure (www.billsure.com.au)
+- Tagline: "Never be surprised by a bill again"
+- Database: Supabase Postgres
 - Auth: Supabase Auth (email/password) with custom JWT fallback
 - Admin login redirects to /admin, customer to /dashboard
 - Forgot password: /forgot-password page
+- Note: User emails still use @billseasypay.com domain (not migrated to avoid breaking Supabase Auth accounts)
 
 ## Stripe
 - API Key: sk_test_emergent (test mode)
@@ -29,4 +31,3 @@
 ## Supabase
 - Project URL: https://nojrxsbgcmoonnobagcv.supabase.co
 - Service Key: in /app/backend/.env SUPABASE_SERVICE_KEY
-- Auth: Both admin and test users are synced to Supabase Auth
