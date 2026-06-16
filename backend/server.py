@@ -7,7 +7,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import asyncio
@@ -34,14 +33,13 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import supabase_db as sdb
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Supabase connection (replaces MongoDB)
+sdb.get_supabase()
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -132,7 +130,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user_id = payload.get("user_id")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await sdb.find_one("users", {"id": user_id})
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -343,7 +341,7 @@ async def root():
 @limiter.limit("5/minute")
 async def register(request: Request, user_data: UserRegister):
     # Check if user exists
-    existing_user = await db.users.find_one({"email": user_data.email}, {"_id": 0})
+    existing_user = await sdb.find_one("users", {"email": user_data.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -357,7 +355,7 @@ async def register(request: Request, user_data: UserRegister):
     user_dict = user.model_dump()
     user_dict["password"] = hashed_password
     
-    await db.users.insert_one(user_dict)
+    await sdb.insert_one("users", user_dict)
     
     # Create token
     token = create_access_token({"user_id": user.id, "email": user.email})
@@ -367,7 +365,7 @@ async def register(request: Request, user_data: UserRegister):
 @api_router.post("/auth/login")
 @limiter.limit("10/minute")
 async def login(request: Request, credentials: UserLogin):
-    user = await db.users.find_one({"email": credentials.email}, {"_id": 0})
+    user = await sdb.find_one("users", {"email": credentials.email})
     if not user or not verify_password(credentials.password, user.get("password", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
@@ -388,37 +386,37 @@ async def create_bill(bill_data: BillCreate, current_user: dict = Depends(get_cu
         **bill_data.model_dump()
     )
     bill_dict = bill.model_dump()
-    await db.bills.insert_one(bill_dict)
+    await sdb.insert_one("bills", bill_dict)
     return bill
 
 @api_router.get("/bills", response_model=List[Bill])
 async def get_bills(current_user: dict = Depends(get_current_user)):
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     return bills
 
 @api_router.get("/bills/{bill_id}", response_model=Bill)
 async def get_bill(bill_id: str, current_user: dict = Depends(get_current_user)):
-    bill = await db.bills.find_one({"id": bill_id, "user_id": current_user["id"]}, {"_id": 0})
+    bill = await sdb.find_one("bills", {"id": bill_id, "user_id": current_user["id"]})
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     return bill
 
 @api_router.put("/bills/{bill_id}", response_model=Bill)
 async def update_bill(bill_id: str, bill_data: BillCreate, current_user: dict = Depends(get_current_user)):
-    result = await db.bills.update_one(
+    result = await sdb.update_one("bills",
         {"id": bill_id, "user_id": current_user["id"]},
         {"$set": bill_data.model_dump()}
     )
-    if result.matched_count == 0:
+    if not result:
         raise HTTPException(status_code=404, detail="Bill not found")
     
-    updated_bill = await db.bills.find_one({"id": bill_id}, {"_id": 0})
+    updated_bill = await sdb.find_one("bills", {"id": bill_id})
     return updated_bill
 
 @api_router.delete("/bills/{bill_id}")
 async def delete_bill(bill_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.bills.delete_one({"id": bill_id, "user_id": current_user["id"]})
-    if result.deleted_count == 0:
+    result = await sdb.delete_one("bills", {"id": bill_id, "user_id": current_user["id"]})
+    if not result:
         raise HTTPException(status_code=404, detail="Bill not found")
     return {"message": "Bill deleted successfully"}
 
@@ -426,7 +424,7 @@ async def delete_bill(bill_id: str, current_user: dict = Depends(get_current_use
 @api_router.post("/payment-structure", response_model=PaymentStructure)
 async def create_payment_structure(data: PaymentStructureCreate, current_user: dict = Depends(get_current_user)):
     # Get all bills for the user
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     
     # Calculate total yearly bills based on frequency
     total_yearly = 0
@@ -464,31 +462,28 @@ async def create_payment_structure(data: PaymentStructureCreate, current_user: d
     )
     
     # Delete existing structure
-    await db.payment_structures.delete_many({"user_id": current_user["id"]})
+    await sdb.delete_many("payment_structures", {"user_id": current_user["id"]})
     
     # Create new structure
-    await db.payment_structures.insert_one(payment_structure.model_dump())
+    await sdb.insert_one("payment_structures", payment_structure.model_dump())
     
     return payment_structure
 
 @api_router.get("/payment-structure", response_model=PaymentStructure)
 async def get_payment_structure(current_user: dict = Depends(get_current_user)):
-    structure = await db.payment_structures.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    structure = await sdb.find_one("payment_structures", {"user_id": current_user["id"]})
     if not structure:
         raise HTTPException(status_code=404, detail="Payment structure not set up")
     return structure
 
 @api_router.put("/payment-structure/toggle-auto-deduct")
 async def toggle_auto_deduct(current_user: dict = Depends(get_current_user)):
-    structure = await db.payment_structures.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    structure = await sdb.find_one("payment_structures", {"user_id": current_user["id"]})
     if not structure:
         raise HTTPException(status_code=404, detail="Payment structure not set up")
     
     new_status = not structure.get("auto_deduct_enabled", True)
-    await db.payment_structures.update_one(
-        {"user_id": current_user["id"]},
-        {"$set": {"auto_deduct_enabled": new_status}}
-    )
+    await sdb.update_one("payment_structures", {"user_id": current_user["id"]}, {"$set": {"auto_deduct_enabled": new_status}})
     
     return {"auto_deduct_enabled": new_status, "message": f"Auto-deduction {'enabled' if new_status else 'disabled'}"}
 
@@ -502,28 +497,24 @@ async def add_bank_details(bank_data: BankDetailsCreate, current_user: dict = De
 
     # Set other bank accounts as non-primary if this is primary
     if bank_details.is_primary:
-        await db.bank_details.update_many(
-            {"user_id": current_user["id"]},
-            {"$set": {"is_primary": False}}
-        )
+        await sdb.update_many("bank_details", {"user_id": current_user["id"]}, {"$set": {"is_primary": False}})
 
     bd_dict = bank_details.model_dump()
     # Encrypt sensitive fields before storing
     bd_dict["account_number"] = encrypt_field(bd_dict["account_number"])
     bd_dict["routing_number"] = encrypt_field(bd_dict["routing_number"])
-    await db.bank_details.insert_one(bd_dict)
+    await sdb.insert_one("bank_details", bd_dict)
 
     # Return masked version (never return encrypted or raw values)
     raw_acct = bank_data.account_number
     raw_rout = bank_data.routing_number
     bd_dict["account_number"] = "****" + raw_acct[-4:]
     bd_dict["routing_number"] = "****" + raw_rout[-4:]
-    bd_dict.pop("_id", None)
     return bd_dict
 
 @api_router.get("/bank-details")
 async def get_bank_details(current_user: dict = Depends(get_current_user)):
-    bank_accounts = await db.bank_details.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    bank_accounts = await sdb.find_many("bank_details", {"user_id": current_user["id"]})
     # Decrypt then mask account numbers for security (show only last 4 digits)
     for account in bank_accounts:
         raw_acct = decrypt_field(account.get("account_number", ""))
@@ -534,8 +525,8 @@ async def get_bank_details(current_user: dict = Depends(get_current_user)):
 
 @api_router.delete("/bank-details/{bank_id}")
 async def delete_bank_details(bank_id: str, current_user: dict = Depends(get_current_user)):
-    result = await db.bank_details.delete_one({"id": bank_id, "user_id": current_user["id"]})
-    if result.deleted_count == 0:
+    result = await sdb.delete_one("bank_details", {"id": bank_id, "user_id": current_user["id"]})
+    if not result:
         raise HTTPException(status_code=404, detail="Bank account not found")
     return {"message": "Bank account deleted successfully"}
 
@@ -554,7 +545,7 @@ async def save_parsed_bill(bill_data: BillCreate, current_user: dict = Depends(g
         **bill_data.model_dump()
     )
     bill_dict = bill.model_dump()
-    await db.bills.insert_one(bill_dict)
+    await sdb.insert_one("bills", bill_dict)
     return bill
 
 # Automatic bill payment scheduler (simulated)
@@ -568,12 +559,12 @@ async def process_auto_payments(current_user: dict = Depends(get_current_user)):
     today = datetime.now(timezone.utc)
     three_days_later = today + timedelta(days=3)
     
-    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
     
     paid_bills = []
     failed_bills = []
     
-    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    user = await sdb.find_one("users", {"id": current_user["id"]})
     
     for bill in bills:
         bill_due_date = datetime.fromisoformat(bill["due_date"].replace('Z', '+00:00'))
@@ -588,19 +579,13 @@ async def process_auto_payments(current_user: dict = Depends(get_current_user)):
                     amount=bill["amount"],
                     description=f"Auto-payment for {bill['category']} - {bill['provider']}"
                 )
-                await db.transactions.insert_one(transaction.model_dump())
+                await sdb.insert_one("transactions", transaction.model_dump())
                 
                 # Update wallet balance
-                await db.users.update_one(
-                    {"id": current_user["id"]},
-                    {"$inc": {"wallet_balance": -bill["amount"]}}
-                )
+                await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
                 
                 # Update bill status
-                await db.bills.update_one(
-                    {"id": bill["id"]},
-                    {"$set": {"status": "paid"}}
-                )
+                await sdb.update_one("bills", {"id": bill["id"]}, {"$set": {"status": "paid"}})
                 
                 paid_bills.append(bill)
                 user["wallet_balance"] -= bill["amount"]
@@ -625,20 +610,17 @@ async def deposit_to_wallet(payment: MockPayment, current_user: dict = Depends(g
         amount=payment.amount,
         description=f"Deposit via {payment.payment_method}"
     )
-    await db.transactions.insert_one(transaction.model_dump())
+    await sdb.insert_one("transactions", transaction.model_dump())
     
     # Update wallet balance
-    await db.users.update_one(
-        {"id": current_user["id"]},
-        {"$inc": {"wallet_balance": payment.amount}}
-    )
+    await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": payment.amount}})
     
     return {"message": "Deposit successful", "transaction": transaction}
 
 @api_router.post("/transactions/pay-bill/{bill_id}")
 async def pay_bill(bill_id: str, current_user: dict = Depends(get_current_user)):
     # Get bill
-    bill = await db.bills.find_one({"id": bill_id, "user_id": current_user["id"]}, {"_id": 0})
+    bill = await sdb.find_one("bills", {"id": bill_id, "user_id": current_user["id"]})
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     
@@ -646,7 +628,7 @@ async def pay_bill(bill_id: str, current_user: dict = Depends(get_current_user))
         raise HTTPException(status_code=400, detail="Bill already paid")
     
     # Check wallet balance
-    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    user = await sdb.find_one("users", {"id": current_user["id"]})
     if user["wallet_balance"] < bill["amount"]:
         raise HTTPException(status_code=400, detail="Insufficient wallet balance")
     
@@ -657,32 +639,26 @@ async def pay_bill(bill_id: str, current_user: dict = Depends(get_current_user))
         amount=bill["amount"],
         description=f"Payment for {bill['category']} - {bill['provider']}"
     )
-    await db.transactions.insert_one(transaction.model_dump())
+    await sdb.insert_one("transactions", transaction.model_dump())
     
     # Update wallet balance
-    await db.users.update_one(
-        {"id": current_user["id"]},
-        {"$inc": {"wallet_balance": -bill["amount"]}}
-    )
+    await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
     
     # Update bill status
-    await db.bills.update_one(
-        {"id": bill_id},
-        {"$set": {"status": "paid"}}
-    )
+    await sdb.update_one("bills", {"id": bill_id}, {"$set": {"status": "paid"}})
     
     return {"message": "Bill paid successfully", "transaction": transaction}
 
 @api_router.get("/transactions", response_model=List[Transaction])
 async def get_transactions(current_user: dict = Depends(get_current_user)):
-    transactions = await db.transactions.find({"user_id": current_user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    transactions = await sdb.find_many("transactions", {"user_id": current_user["id"]}, order_by="created_at", order_desc=True)
     return transactions
 
 # Dashboard stats
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    transactions = await db.transactions.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
+    transactions = await sdb.find_many("transactions", {"user_id": current_user["id"]})
     
     total_bills = len(bills)
     pending_bills = len([b for b in bills if b["status"] == "pending"])
@@ -1268,10 +1244,9 @@ async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, curren
     ddr_store["bsb"] = encrypt_field(formatted_bsb)
     ddr_store["account_number"] = encrypt_field(ddr_store["account_number"])
     ddr_store["provider_account_number"] = encrypt_field(ddr_store["provider_account_number"])
-    await db.direct_debit_requests.insert_one(ddr_store)
+    await sdb.insert_one("direct_debit_requests", ddr_store)
     
     # Return masked version
-    ddr_store.pop("_id", None)
     ddr_store["bsb"] = formatted_bsb[:3] + "-***"
     ddr_store["account_number"] = "****" + ddr_data.account_number[-4:]
     ddr_store["provider_account_number"] = "****" + ddr_data.provider_account_number[-4:]
@@ -1280,7 +1255,7 @@ async def create_direct_debit_request(ddr_data: DirectDebitRequestCreate, curren
 @api_router.get("/direct-debit/mandates")
 async def get_direct_debit_mandates(current_user: dict = Depends(get_current_user)):
     """Get all DDR mandates for the current user"""
-    mandates = await db.direct_debit_requests.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    mandates = await sdb.find_many("direct_debit_requests", {"user_id": current_user["id"]})
     # Decrypt and mask sensitive fields
     for m in mandates:
         raw_bsb = decrypt_field(m.get("bsb", ""))
@@ -1294,7 +1269,7 @@ async def get_direct_debit_mandates(current_user: dict = Depends(get_current_use
 @api_router.get("/direct-debit/mandate/{mandate_id}")
 async def get_direct_debit_mandate(mandate_id: str, current_user: dict = Depends(get_current_user)):
     """Get a specific DDR mandate"""
-    mandate = await db.direct_debit_requests.find_one({"id": mandate_id, "user_id": current_user["id"]}, {"_id": 0})
+    mandate = await sdb.find_one("direct_debit_requests", {"id": mandate_id, "user_id": current_user["id"]})
     if not mandate:
         raise HTTPException(status_code=404, detail="Mandate not found")
     # Decrypt and mask
@@ -1309,12 +1284,9 @@ async def get_direct_debit_mandate(mandate_id: str, current_user: dict = Depends
 @api_router.put("/direct-debit/mandate/{mandate_id}/cancel")
 async def cancel_direct_debit_mandate(mandate_id: str, current_user: dict = Depends(get_current_user)):
     """Cancel a DDR mandate"""
-    result = await db.direct_debit_requests.update_one(
-        {"id": mandate_id, "user_id": current_user["id"]},
-        {"$set": {"status": "cancelled"}}
-    )
+    result = await sdb.update_one("direct_debit_requests", {"id": mandate_id, "user_id": current_user["id"]}, {"$set": {"status": "cancelled"}})
     
-    if result.matched_count == 0:
+    if not result:
         raise HTTPException(status_code=404, detail="Mandate not found")
     
     return {"message": "Direct Debit mandate cancelled successfully", "mandate_id": mandate_id}
@@ -1361,30 +1333,29 @@ async def connect_provider(provider_data: ProviderConnectionCreate, current_user
     )
     
     # Check if connection already exists
-    existing = await db.provider_connections.find_one({
+    existing = await sdb.find_one("provider_connections", {
         "user_id": current_user["id"],
-        "provider_name": provider_data.provider_name,
-        "account_number": provider_data.account_number
+        "provider_name": provider_data.provider_name
     })
     
     if existing:
         raise HTTPException(status_code=400, detail="Provider already connected")
     
-    await db.provider_connections.insert_one(provider.model_dump())
+    await sdb.insert_one("provider_connections", provider.model_dump())
     
     return provider
 
 @api_router.get("/provider/connections", response_model=List[ProviderConnection])
 async def get_provider_connections(current_user: dict = Depends(get_current_user)):
     """Get all provider connections for the user"""
-    connections = await db.provider_connections.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
+    connections = await sdb.find_many("provider_connections", {"user_id": current_user["id"]})
     return connections
 
 @api_router.post("/provider/sync/{connection_id}")
 async def sync_provider_bills(connection_id: str, current_user: dict = Depends(get_current_user)):
     """Sync bills from a connected provider"""
     
-    connection = await db.provider_connections.find_one({"id": connection_id, "user_id": current_user["id"]}, {"_id": 0})
+    connection = await sdb.find_one("provider_connections", {"id": connection_id, "user_id": current_user["id"]})
     
     if not connection:
         raise HTTPException(status_code=404, detail="Provider connection not found")
@@ -1417,11 +1388,11 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
                     status="pending"
                 )
                 
-                await db.bills.insert_one(bill.model_dump())
+                await sdb.insert_one("bills", bill.model_dump())
                 bills_fetched.append(bill)
         
         # Update last sync time
-        await db.provider_connections.update_one(
+        await sdb.update_one("provider_connections",(
             {"id": connection_id},
             {"$set": {"last_sync": datetime.now(timezone.utc).isoformat()}}
         )
@@ -1438,9 +1409,9 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
 @api_router.delete("/provider/disconnect/{connection_id}")
 async def disconnect_provider(connection_id: str, current_user: dict = Depends(get_current_user)):
     """Disconnect from a provider"""
-    result = await db.provider_connections.delete_one({"id": connection_id, "user_id": current_user["id"]})
+    result = await sdb.delete_one("provider_connections", {"id": connection_id, "user_id": current_user["id"]})
     
-    if result.deleted_count == 0:
+    if not result:
         raise HTTPException(status_code=404, detail="Provider connection not found")
     
     return {"message": "Provider disconnected successfully"}
@@ -1453,7 +1424,7 @@ async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(sec
     user_id = payload.get("user_id")
     if user_id is None:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await sdb.find_one("users", {"id": user_id})
     if user is None or not user.get("is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
@@ -1461,13 +1432,13 @@ async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(sec
 @api_router.get("/admin/stats")
 async def get_admin_stats(admin_user: dict = Depends(get_admin_user)):
     """Get overall platform statistics"""
-    total_users = await db.users.count_documents({})
-    total_bills = await db.bills.count_documents({})
-    total_transactions = await db.transactions.count_documents({})
-    pending_bills = await db.bills.count_documents({"status": "pending"})
+    total_users = await sdb.count_documents("users", {})
+    total_bills = await sdb.count_documents("bills", {})
+    total_transactions = await sdb.count_documents("transactions", {})
+    pending_bills = await sdb.count_documents("bills", {"status": "pending"})
     
     # Calculate total revenue (subscription fees)
-    users = await db.users.find({}, {"_id": 0, "subscription_fee": 1}).to_list(10000)
+    users = await sdb.find_many("users", {})
     total_monthly_revenue = sum(u.get("subscription_fee", 5.0) for u in users)
     
     return {
@@ -1481,12 +1452,14 @@ async def get_admin_stats(admin_user: dict = Depends(get_admin_user)):
 @api_router.get("/admin/users")
 async def get_all_users(admin_user: dict = Depends(get_admin_user)):
     """Get all users with their bill counts"""
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+    users = await sdb.find_many("users", exclude_fields=["password"])
 
-    # Batch: get bill counts via aggregation
-    pipeline = [{"$group": {"_id": "$user_id", "count": {"$sum": 1}}}]
-    bill_counts = await db.bills.aggregate(pipeline).to_list(10000)
-    count_map = {bc["_id"]: bc["count"] for bc in bill_counts}
+    # Get bill counts per user (replaces MongoDB aggregation)
+    all_bills = await sdb.find_many("bills")
+    count_map = {}
+    for b in all_bills:
+        uid = b.get("user_id", "")
+        count_map[uid] = count_map.get(uid, 0) + 1
 
     for user in users:
         user["bill_count"] = count_map.get(user["id"], 0)
@@ -1534,7 +1507,7 @@ async def get_bulk_payment_report(
     if provider:
         query["provider"] = {"$regex": provider, "$options": "i"}
 
-    all_pending = await db.bills.find(query, {"_id": 0}).to_list(10000)
+    all_pending = await sdb.find_many("bills", query)
 
     start_str = start.strftime('%Y-%m-%d')
     end_str = end.strftime('%Y-%m-%d')
@@ -1549,7 +1522,7 @@ async def get_bulk_payment_report(
     
     # Get user details in batch
     user_ids = list(set(b["user_id"] for b in bills))
-    users_list = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password": 0}).to_list(10000)
+    users_list = await sdb.find_many("users", {"id": {"$in": user_ids}})
     user_map = {u["id"]: u for u in users_list}
 
     bill_reports = []
@@ -1606,14 +1579,14 @@ async def process_bulk_payment(
     Mark bills as paid in bulk (after admin processes payment to provider)
     """
     now = datetime.now(timezone.utc).isoformat()
-    result = await db.bills.update_many(
+    result = await sdb.update_many("bills",(
         {"id": {"$in": bill_ids}, "provider": provider, "status": "pending"},
         {"$set": {"status": "paid", "paid_by": "admin", "paid_at": now}}
     )
     
     return {
         "message": f"Bulk payment processed for {provider}",
-        "bills_updated": result.modified_count
+        "bills_updated": result
     }
 
 
@@ -1625,7 +1598,7 @@ class AdminPayBillRequest(BaseModel):
 @api_router.post("/admin/pay-bill")
 async def admin_pay_single_bill(data: AdminPayBillRequest, admin_user: dict = Depends(get_admin_user)):
     """Admin marks a single bill as paid after making BPAY/bank payment on behalf of customer."""
-    bill = await db.bills.find_one({"id": data.bill_id, "status": "pending"}, {"_id": 0})
+    bill = await sdb.find_one("bills", {"id": data.bill_id, "status": "pending"})
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found or already paid")
 
@@ -1638,13 +1611,10 @@ async def admin_pay_single_bill(data: AdminPayBillRequest, admin_user: dict = De
     if data.payment_reference:
         update["payment_reference"] = data.payment_reference
 
-    await db.bills.update_one({"id": data.bill_id}, {"$set": update})
+    await sdb.update_one("bills", {"id": data.bill_id}, {"$set": update})
 
     # Deduct from customer wallet
-    await db.users.update_one(
-        {"id": bill["user_id"]},
-        {"$inc": {"wallet_balance": -bill["amount"]}}
-    )
+    await sdb.update_one("users", {"id": bill["user_id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
 
     # Record transaction
     tx = Transaction(
@@ -1653,7 +1623,7 @@ async def admin_pay_single_bill(data: AdminPayBillRequest, admin_user: dict = De
         amount=bill["amount"],
         description=f"Admin BPAY payment: {bill['provider']} - Ref: {data.payment_reference or 'N/A'}"
     )
-    await db.transactions.insert_one(tx.model_dump())
+    await sdb.insert_one("transactions", tx.model_dump())
 
     return {"message": f"Bill paid: {bill['provider']} ${bill['amount']:.2f}", "bill_id": data.bill_id}
 
@@ -1671,7 +1641,7 @@ async def admin_pay_bills_bulk(data: AdminBulkPayRequest, admin_user: dict = Dep
     total_amount = 0
 
     for bill_id in data.bill_ids:
-        bill = await db.bills.find_one({"id": bill_id, "status": "pending"}, {"_id": 0})
+        bill = await sdb.find_one("bills", {"id": bill_id, "status": "pending"})
         if not bill:
             continue
 
@@ -1679,8 +1649,8 @@ async def admin_pay_bills_bulk(data: AdminBulkPayRequest, admin_user: dict = Dep
         if data.payment_reference:
             update["payment_reference"] = data.payment_reference
 
-        await db.bills.update_one({"id": bill_id}, {"$set": update})
-        await db.users.update_one({"id": bill["user_id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
+        await sdb.update_one("bills", {"id": bill_id}, {"$set": update})
+        await sdb.update_one("users", {"id": bill["user_id"]}, {"$inc": {"wallet_balance": -bill["amount"]}})
 
         tx = Transaction(
             user_id=bill["user_id"],
@@ -1688,7 +1658,7 @@ async def admin_pay_bills_bulk(data: AdminBulkPayRequest, admin_user: dict = Dep
             amount=bill["amount"],
             description=f"Admin bulk BPAY payment: {bill['provider']} - Ref: {data.payment_reference or 'N/A'}"
         )
-        await db.transactions.insert_one(tx.model_dump())
+        await sdb.insert_one("transactions", tx.model_dump())
         paid_count += 1
         total_amount += bill["amount"]
 
@@ -1701,10 +1671,10 @@ async def admin_payment_queue(admin_user: dict = Depends(get_admin_user)):
     Get all pending bills with full payment details for admin to process BPAY/bank payments.
     Grouped by provider with biller codes and reference numbers.
     """
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
 
     user_ids = list(set(b["user_id"] for b in all_pending))
-    users_list = await db.users.find({"id": {"$in": user_ids}}, {"_id": 0, "password": 0}).to_list(10000)
+    users_list = await sdb.find_many("users", {"id": {"$in": user_ids}})
     user_map = {u["id"]: u for u in users_list}
 
     queue = []
@@ -1760,9 +1730,7 @@ async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Dep
         # Raw card number is NEVER stored — PCI DSS compliance
 
     if data.is_primary:
-        await db.payment_methods.update_many(
-            {"user_id": current_user["id"]}, {"$set": {"is_primary": False}}
-        )
+        await sdb.update_many("payment_methods", {"user_id": current_user["id"]}, {"$set": {"is_primary": False}})
 
     pm = PaymentMethod(
         user_id=current_user["id"],
@@ -1776,9 +1744,8 @@ async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Dep
         is_primary=data.is_primary,
     )
     pm_dict = pm.model_dump()
-    await db.payment_methods.insert_one(pm_dict)
+    await sdb.insert_one("payment_methods", pm_dict)
     # Return safe version (decrypt bsb for masking)
-    pm_dict.pop("_id", None)
     if pm_dict.get("bsb"):
         raw_bsb = decrypt_field(pm_dict["bsb"])
         pm_dict["bsb"] = raw_bsb[:3] + "-***" if len(raw_bsb) >= 3 else None
@@ -1786,7 +1753,7 @@ async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Dep
 
 @api_router.get("/payment-methods")
 async def get_payment_methods(current_user: dict = Depends(get_current_user)):
-    methods = await db.payment_methods.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(100)
+    methods = await sdb.find_many("payment_methods", {"user_id": current_user["id"]})
     for m in methods:
         if m.get("bsb"):
             raw_bsb = decrypt_field(m["bsb"])
@@ -1795,20 +1762,16 @@ async def get_payment_methods(current_user: dict = Depends(get_current_user)):
 
 @api_router.delete("/payment-methods/{method_id}")
 async def delete_payment_method(method_id: str, current_user: dict = Depends(get_current_user)):
-    r = await db.payment_methods.delete_one({"id": method_id, "user_id": current_user["id"]})
-    if r.deleted_count == 0:
+    r = await sdb.delete_one("payment_methods", {"id": method_id, "user_id": current_user["id"]})
+    if not r:
         raise HTTPException(status_code=404, detail="Payment method not found")
     return {"message": "Payment method removed"}
 
 @api_router.put("/payment-methods/{method_id}/set-primary")
 async def set_primary_payment_method(method_id: str, current_user: dict = Depends(get_current_user)):
-    await db.payment_methods.update_many(
-        {"user_id": current_user["id"]}, {"$set": {"is_primary": False}}
-    )
-    r = await db.payment_methods.update_one(
-        {"id": method_id, "user_id": current_user["id"]}, {"$set": {"is_primary": True}}
-    )
-    if r.matched_count == 0:
+    await sdb.update_many("payment_methods", {"user_id": current_user["id"]}, {"$set": {"is_primary": False}})
+    r = await sdb.update_one("payment_methods", {"id": method_id, "user_id": current_user["id"]}, {"$set": {"is_primary": True}})
+    if not r:
         raise HTTPException(status_code=404, detail="Payment method not found")
     return {"message": "Primary payment method updated"}
 
@@ -1837,7 +1800,7 @@ def _calc_annual_total(bills: list) -> float:
 @api_router.get("/payment-plan/calculate")
 async def calculate_payment_plan(current_user: dict = Depends(get_current_user)):
     """Calculate 3 deduction options based on all user bills with safety buffer."""
-    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
     annual_total = _calc_annual_total(bills)
     buffered_annual = annual_total * (1 + SAFETY_BUFFER)
 
@@ -1863,7 +1826,7 @@ async def select_payment_plan(frequency: str, current_user: dict = Depends(get_c
     if frequency not in ("weekly", "fortnightly", "monthly"):
         raise HTTPException(status_code=400, detail="Invalid frequency")
 
-    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
     annual_total = _calc_annual_total(bills)
     buffered = annual_total * (1 + SAFETY_BUFFER)
 
@@ -1886,15 +1849,14 @@ async def select_payment_plan(frequency: str, current_user: dict = Depends(get_c
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    await db.payment_plans.delete_many({"user_id": current_user["id"]})
-    await db.payment_plans.insert_one(plan)
-    plan.pop("_id", None)
+    await sdb.delete_many("payment_plans", {"user_id": current_user["id"]})
+    await sdb.insert_one("payment_plans", plan)
     return plan
 
 
 @api_router.get("/payment-plan/current")
 async def get_current_plan(current_user: dict = Depends(get_current_user)):
-    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"]})
     if not plan:
         return {"status": "none", "message": "No payment plan selected"}
     return plan
@@ -1903,7 +1865,7 @@ async def get_current_plan(current_user: dict = Depends(get_current_user)):
 @api_router.post("/payment-plan/simulate-deduction")
 async def simulate_deduction(current_user: dict = Depends(get_current_user)):
     """Simulate a scheduled deduction from customer's payment method."""
-    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"]})
     if not plan or plan.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active payment plan")
 
@@ -1915,13 +1877,10 @@ async def simulate_deduction(current_user: dict = Depends(get_current_user)):
         amount=amount,
         description=f"Scheduled {plan['frequency']} deduction"
     )
-    await db.transactions.insert_one(tx.model_dump())
+    await sdb.insert_one("transactions", tx.model_dump())
     # Update wallet and plan
-    await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
-    await db.payment_plans.update_one(
-        {"user_id": current_user["id"]},
-        {"$inc": {"total_collected": amount}}
-    )
+    await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
+    await sdb.update_one("payment_plans", {"user_id": current_user["id"]}, {"$inc": {"total_collected": amount}})
     return {"message": f"Deduction of ${amount:.2f} processed", "amount": amount}
 
 
@@ -1929,17 +1888,17 @@ async def simulate_deduction(current_user: dict = Depends(get_current_user)):
 @api_router.get("/admin/financial-overview")
 async def admin_financial_overview(admin_user: dict = Depends(get_admin_user)):
     """Company financial dashboard: collected vs owed, cash flow."""
-    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
-    all_paid = await db.bills.find({"status": "paid"}, {"_id": 0}).to_list(10000)
-    all_users = await db.users.count_documents({})
+    all_plans = await sdb.find_many("payment_plans", {})
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
+    all_paid = await sdb.find_many("bills", {"status": "paid"})
+    all_users = await sdb.count_documents("users", {})
     active_plans = [p for p in all_plans if p.get("status") == "active"]
 
     total_collected = sum(p.get("total_collected", 0) for p in all_plans)
     total_paid_out = sum(p.get("total_paid_out", 0) for p in all_plans)
     total_wallet = sum(
-        (await db.users.find({}, {"_id": 0, "wallet_balance": 1}).to_list(10000))
-        and [u.get("wallet_balance", 0) for u in await db.users.find({}, {"_id": 0, "wallet_balance": 1}).to_list(10000)]
+        (await sdb.find_many("users", {}))
+        and [u.get("wallet_balance", 0) for u in await sdb.find_many("users", {})]
     )
     total_pending_amount = sum(b.get("amount", 0) for b in all_pending)
     total_paid_amount = sum(b.get("amount", 0) for b in all_paid)
@@ -1964,7 +1923,7 @@ async def admin_financial_overview(admin_user: dict = Depends(get_admin_user)):
 @api_router.get("/admin/outstanding-by-period")
 async def admin_outstanding_by_period(admin_user: dict = Depends(get_admin_user)):
     """Outstanding bills grouped by time period for finance management."""
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
     overdue, this_month, next_30, next_60, next_90, beyond = [], [], [], [], [], []
@@ -2010,11 +1969,11 @@ async def admin_outstanding_by_period(admin_user: dict = Depends(get_admin_user)
 @api_router.get("/admin/customer-analytics")
 async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
     """Customer-level analytics for risk and compliance."""
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+    users = await sdb.find_many("users", exclude_fields=["password"])
 
     # Batch fetch all bills and plans
-    all_bills = await db.bills.find({}, {"_id": 0}).to_list(100000)
-    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+    all_bills = await sdb.find_many("bills", {})
+    all_plans = await sdb.find_many("payment_plans", {})
 
     # Build lookup maps
     bills_by_user = {}
@@ -2082,7 +2041,7 @@ async def create_checkout_session(data: TopUpRequest, request: Request, current_
 
     # Determine amount server-side
     if data.package_id == "custom_plan":
-        plan = await db.payment_plans.find_one({"user_id": current_user["id"], "status": "active"}, {"_id": 0})
+        plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"], "status": "active"})
         if not plan:
             raise HTTPException(status_code=400, detail="No active plan to determine amount")
         amount = float(plan["deduction_amount"])
@@ -2147,7 +2106,7 @@ async def create_checkout_session(data: TopUpRequest, request: Request, current_
         "metadata": metadata,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.payment_transactions.insert_one(tx)
+    await sdb.insert_one("payment_transactions", tx)
 
     return {"url": session.url, "session_id": session.session_id, "amount": amount}
 
@@ -2158,7 +2117,7 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
     if not STRIPE_API_KEY:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
-    tx = await db.payment_transactions.find_one({"session_id": session_id}, {"_id": 0})
+    tx = await sdb.find_one("payment_transactions", {"session_id": session_id})
     if not tx:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
@@ -2176,8 +2135,8 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
         if checkout_status.payment_status == "paid" and tx.get("payment_status") != "paid":
             # Credit wallet - only once
             amount = tx["amount"]
-            await db.users.update_one({"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-            await db.payment_transactions.update_one(
+            await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
+            await sdb.update_one("payment_transactions",(
                 {"session_id": session_id},
                 {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
             )
@@ -2188,19 +2147,13 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
                 amount=amount,
                 description=f"Wallet top-up via Stripe (${amount:.2f})"
             )
-            await db.transactions.insert_one(tx_record.model_dump())
+            await sdb.insert_one("transactions", tx_record.model_dump())
 
             # Also update plan total_collected
-            await db.payment_plans.update_one(
-                {"user_id": tx["user_id"], "status": "active"},
-                {"$inc": {"total_collected": amount}}
-            )
+            await sdb.update_one("payment_plans", {"user_id": tx["user_id"], "status": "active"}, {"$inc": {"total_collected": amount}})
 
         elif checkout_status.status == "expired":
-            await db.payment_transactions.update_one(
-                {"session_id": session_id},
-                {"$set": {"payment_status": "expired", "status": "expired"}}
-            )
+            await sdb.update_one("payment_transactions", {"session_id": session_id}, {"$set": {"payment_status": "expired", "status": "expired"}})
 
         return {
             "status": checkout_status.status,
@@ -2230,18 +2183,15 @@ async def stripe_webhook(request: Request):
         event = await stripe_checkout.handle_webhook(body, sig)
 
         if event.payment_status == "paid":
-            tx = await db.payment_transactions.find_one({"session_id": event.session_id}, {"_id": 0})
+            tx = await sdb.find_one("payment_transactions", {"session_id": event.session_id})
             if tx and tx.get("payment_status") != "paid":
                 amount = tx["amount"]
-                await db.users.update_one({"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-                await db.payment_transactions.update_one(
+                await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
+                await sdb.update_one("payment_transactions",(
                     {"session_id": event.session_id},
                     {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
                 )
-                await db.payment_plans.update_one(
-                    {"user_id": tx["user_id"], "status": "active"},
-                    {"$inc": {"total_collected": amount}}
-                )
+                await sdb.update_one("payment_plans", {"user_id": tx["user_id"], "status": "active"}, {"$inc": {"total_collected": amount}})
 
         return {"status": "ok"}
     except Exception as e:
@@ -2252,9 +2202,7 @@ async def stripe_webhook(request: Request):
 @api_router.get("/payments/history")
 async def get_payment_history(current_user: dict = Depends(get_current_user)):
     """Get user's Stripe payment history."""
-    txs = await db.payment_transactions.find(
-        {"user_id": current_user["id"]}, {"_id": 0}
-    ).sort("created_at", -1).to_list(100)
+    txs = await sdb.find_many("payment_transactions", {"user_id": current_user["id"]}, order_by="created_at", order_desc=True, limit=100)
     return txs
 
 
@@ -2267,7 +2215,7 @@ async def process_auto_deductions():
             today_str = now.strftime('%Y-%m-%d')
 
             # 1. Process plan deductions that are due
-            active_plans = await db.payment_plans.find({"status": "active"}, {"_id": 0}).to_list(10000)
+            active_plans = await sdb.find_many("payment_plans", {"status": "active"})
             for plan in active_plans:
                 next_date_str = plan.get("next_deduction_date", "")[:10]
                 if next_date_str and next_date_str <= today_str:
@@ -2276,8 +2224,8 @@ async def process_auto_deductions():
                     freq = plan["frequency"]
 
                     # Deduct from wallet (simulate scheduled collection)
-                    await db.users.update_one({"id": uid}, {"$inc": {"wallet_balance": amount}})
-                    await db.payment_plans.update_one(
+                    await sdb.update_one("users", {"id": uid}, {"$inc": {"wallet_balance": amount}})
+                    await sdb.update_one("payment_plans",(
                         {"user_id": uid, "status": "active"},
                         {
                             "$inc": {"total_collected": amount},
@@ -2291,32 +2239,29 @@ async def process_auto_deductions():
                         amount=amount,
                         description=f"Scheduled {freq} deduction (${amount:.2f})"
                     )
-                    await db.transactions.insert_one(tx.model_dump())
+                    await sdb.insert_one("transactions", tx.model_dump())
                     logger.info(f"Auto-deduction: ${amount:.2f} for user {uid}")
 
             # 2. Auto-pay bills that are due today or overdue
-            pending_bills = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+            pending_bills = await sdb.find_many("bills", {"status": "pending"})
             for bill in pending_bills:
                 due_str = bill.get("due_date", "")[:10]
                 if due_str and due_str <= today_str:
                     uid = bill["user_id"]
                     amt = bill["amount"]
-                    user = await db.users.find_one({"id": uid}, {"_id": 0})
+                    user = await sdb.find_one("users", {"id": uid})
                     if user and user.get("wallet_balance", 0) >= amt:
                         # Pay the bill
-                        await db.users.update_one({"id": uid}, {"$inc": {"wallet_balance": -amt}})
-                        await db.bills.update_one({"id": bill["id"]}, {"$set": {"status": "paid"}})
-                        await db.payment_plans.update_one(
-                            {"user_id": uid, "status": "active"},
-                            {"$inc": {"total_paid_out": amt}}
-                        )
+                        await sdb.update_one("users", {"id": uid}, {"$inc": {"wallet_balance": -amt}})
+                        await sdb.update_one("bills", {"id": bill["id"]}, {"$set": {"status": "paid"}})
+                        await sdb.update_one("payment_plans", {"user_id": uid, "status": "active"}, {"$inc": {"total_paid_out": amt}})
                         tx = Transaction(
                             user_id=uid,
                             type="auto_bill_payment",
                             amount=amt,
                             description=f"Auto-paid {bill['provider']} - {bill['category']} (${amt:.2f})"
                         )
-                        await db.transactions.insert_one(tx.model_dump())
+                        await sdb.insert_one("transactions", tx.model_dump())
                         logger.info(f"Auto-paid bill {bill['id']}: ${amt:.2f} for user {uid}")
 
         except Exception as e:
@@ -2345,14 +2290,14 @@ async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
     bills_paid = 0
 
     # Process plan deductions
-    plan = await db.payment_plans.find_one({"user_id": current_user["id"], "status": "active"}, {"_id": 0})
+    plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"], "status": "active"})
     if plan:
         next_date_str = plan.get("next_deduction_date", "")[:10]
         if next_date_str and next_date_str <= today_str:
             amount = plan["deduction_amount"]
             freq = plan["frequency"]
-            await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
-            await db.payment_plans.update_one(
+            await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
+            await sdb.update_one("payment_plans",(
                 {"user_id": current_user["id"], "status": "active"},
                 {
                     "$inc": {"total_collected": amount},
@@ -2363,29 +2308,26 @@ async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
                 user_id=current_user["id"], type="auto_deduction", amount=amount,
                 description=f"Manual trigger: {freq} deduction (${amount:.2f})"
             )
-            await db.transactions.insert_one(tx.model_dump())
+            await sdb.insert_one("transactions", tx.model_dump())
             deductions_made = 1
 
     # Auto-pay due bills
-    pending_bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(1000)
-    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    pending_bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
+    user = await sdb.find_one("users", {"id": current_user["id"]})
     balance = user.get("wallet_balance", 0) if user else 0
 
     for bill in pending_bills:
         due_str = bill.get("due_date", "")[:10]
         if due_str and due_str <= today_str and balance >= bill["amount"]:
             amt = bill["amount"]
-            await db.users.update_one({"id": current_user["id"]}, {"$inc": {"wallet_balance": -amt}})
-            await db.bills.update_one({"id": bill["id"]}, {"$set": {"status": "paid"}})
-            await db.payment_plans.update_one(
-                {"user_id": current_user["id"], "status": "active"},
-                {"$inc": {"total_paid_out": amt}}
-            )
+            await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": -amt}})
+            await sdb.update_one("bills", {"id": bill["id"]}, {"$set": {"status": "paid"}})
+            await sdb.update_one("payment_plans", {"user_id": current_user["id"], "status": "active"}, {"$inc": {"total_paid_out": amt}})
             tx = Transaction(
                 user_id=current_user["id"], type="auto_bill_payment", amount=amt,
                 description=f"Auto-paid {bill['provider']} (${amt:.2f})"
             )
-            await db.transactions.insert_one(tx.model_dump())
+            await sdb.insert_one("transactions", tx.model_dump())
             balance -= amt
             bills_paid += 1
 
@@ -2399,9 +2341,7 @@ async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
 @api_router.get("/transactions/history")
 async def get_transaction_history(current_user: dict = Depends(get_current_user)):
     """Get all user transactions (deductions, bill payments, top-ups)."""
-    txs = await db.transactions.find(
-        {"user_id": current_user["id"]}, {"_id": 0}
-    ).sort("created_at", -1).to_list(200)
+    txs = await sdb.find_many("transactions", {"user_id": current_user["id"]}, order_by="created_at", order_desc=True, limit=200)
     return txs
 
 
@@ -2416,10 +2356,10 @@ async def generate_notifications():
             today_str = now.strftime('%Y-%m-%d')
             reminder_date = (now + timedelta(days=REMINDER_DAYS_BEFORE)).strftime('%Y-%m-%d')
 
-            users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+            users = await sdb.find_many("users", exclude_fields=["password"])
             for user in users:
                 uid = user["id"]
-                pending = await db.bills.find({"user_id": uid, "status": "pending"}, {"_id": 0}).to_list(1000)
+                pending = await sdb.find_many("bills", {"user_id": uid, "status": "pending"})
                 wallet = user.get("wallet_balance", 0)
 
                 for bill in pending:
@@ -2429,12 +2369,11 @@ async def generate_notifications():
 
                     # Overdue notification
                     if due_str < today_str:
-                        existing = await db.notifications.find_one({
-                            "user_id": uid, "bill_id": bill["id"], "type": "overdue",
-                            "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                        existing = await sdb.find_one("notifications", {
+                            "user_id": uid, "bill_id": bill["id"], "type": "overdue"
                         })
                         if not existing:
-                            await db.notifications.insert_one({
+                            await sdb.insert_one("notifications", {
                                 "id": str(uuid.uuid4()),
                                 "user_id": uid,
                                 "bill_id": bill["id"],
@@ -2449,13 +2388,12 @@ async def generate_notifications():
 
                     # Upcoming reminder
                     elif due_str <= reminder_date and due_str >= today_str:
-                        existing = await db.notifications.find_one({
-                            "user_id": uid, "bill_id": bill["id"], "type": "upcoming",
-                            "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                        existing = await sdb.find_one("notifications", {
+                            "user_id": uid, "bill_id": bill["id"], "type": "upcoming"
                         })
                         if not existing:
                             days_left = (datetime.strptime(due_str, '%Y-%m-%d').replace(tzinfo=timezone.utc) - now).days
-                            await db.notifications.insert_one({
+                            await sdb.insert_one("notifications", {
                                 "id": str(uuid.uuid4()),
                                 "user_id": uid,
                                 "bill_id": bill["id"],
@@ -2471,12 +2409,11 @@ async def generate_notifications():
                 # Low wallet balance notification
                 total_pending = sum(b.get("amount", 0) for b in pending)
                 if total_pending > 0 and wallet < total_pending * 0.5:
-                    existing = await db.notifications.find_one({
-                        "user_id": uid, "type": "low_balance",
-                        "created_at": {"$gte": (now - timedelta(days=1)).isoformat()}
+                    existing = await sdb.find_one("notifications", {
+                        "user_id": uid, "type": "low_balance"
                     })
                     if not existing:
-                        await db.notifications.insert_one({
+                        await sdb.insert_one("notifications", {
                             "id": str(uuid.uuid4()),
                             "user_id": uid,
                             "bill_id": None,
@@ -2490,16 +2427,16 @@ async def generate_notifications():
                         })
 
             # Send real emails for unsent notifications
-            unsent = await db.notifications.find({"email_sent": False}).to_list(1000)
+            unsent = await sdb.find_many("notifications", {"email_sent": False})
             for n in unsent:
-                user = await db.users.find_one({"id": n["user_id"]}, {"_id": 0, "email": 1, "full_name": 1})
+                user = await sdb.find_one("users", {"id": n["user_id"]})
                 if user:
                     n_type = n.get("type", "")
                     if n_type == "low_balance":
-                        total_pend = sum(b.get("amount", 0) for b in await db.bills.find({"user_id": n["user_id"], "status": "pending"}, {"_id": 0}).to_list(100))
+                        total_pend = sum(b.get("amount", 0) for b in await sdb.find_many("bills", {"user_id": n["user_id"], "status": "pending"}))
                         html = build_low_balance_email(user.get("full_name", ""), float(n.get("message", "0").split("$")[1].split(")")[0]) if "$" in n.get("message", "") else 0, total_pend)
                     else:
-                        bill = await db.bills.find_one({"id": n.get("bill_id")}, {"_id": 0}) if n.get("bill_id") else None
+                        bill = await sdb.find_one("bills", {"id": n.get("bill_id")}) if n.get("bill_id") else None
                         html = build_bill_email(
                             n_type, user.get("full_name", ""),
                             bill.get("provider", "") if bill else "",
@@ -2508,7 +2445,7 @@ async def generate_notifications():
                             n.get("message", "")
                         )
                     await send_email(user["email"], n.get("title", "EasyBillsPay Notification"), html)
-                await db.notifications.update_one({"id": n["id"]}, {"$set": {"email_sent": True}})
+                await sdb.update_one("notifications", {"id": n["id"]}, {"$set": {"email_sent": True}})
 
         except Exception as e:
             logger.error(f"Notification generator error: {e}")
@@ -2518,32 +2455,26 @@ async def generate_notifications():
 
 @api_router.get("/notifications")
 async def get_notifications(current_user: dict = Depends(get_current_user)):
-    notifs = await db.notifications.find(
-        {"user_id": current_user["id"]}, {"_id": 0}
-    ).sort("created_at", -1).to_list(50)
+    notifs = await sdb.find_many("notifications", {"user_id": current_user["id"]}, order_by="created_at", order_desc=True, limit=50)
     unread = sum(1 for n in notifs if not n.get("read"))
     return {"notifications": notifs, "unread_count": unread}
 
 
 @api_router.put("/notifications/{notif_id}/read")
 async def mark_notification_read(notif_id: str, current_user: dict = Depends(get_current_user)):
-    await db.notifications.update_one(
-        {"id": notif_id, "user_id": current_user["id"]}, {"$set": {"read": True}}
-    )
+    await sdb.update_one("notifications", {"id": notif_id, "user_id": current_user["id"]}, {"$set": {"read": True}})
     return {"message": "Marked as read"}
 
 
 @api_router.put("/notifications/read-all")
 async def mark_all_read(current_user: dict = Depends(get_current_user)):
-    await db.notifications.update_many(
-        {"user_id": current_user["id"], "read": False}, {"$set": {"read": True}}
-    )
+    await sdb.update_many("notifications", {"user_id": current_user["id"], "read": False}, {"$set": {"read": True}})
     return {"message": "All marked as read"}
 
 
 @api_router.delete("/notifications/{notif_id}")
 async def delete_notification(notif_id: str, current_user: dict = Depends(get_current_user)):
-    await db.notifications.delete_one({"id": notif_id, "user_id": current_user["id"]})
+    await sdb.delete_one("notifications", {"id": notif_id, "user_id": current_user["id"]})
     return {"message": "Deleted"}
 
 
@@ -2551,7 +2482,7 @@ async def delete_notification(notif_id: str, current_user: dict = Depends(get_cu
 @api_router.get("/admin/export/outstanding-csv")
 async def export_outstanding_csv(admin_user: dict = Depends(get_admin_user)):
     """Export outstanding bills as CSV."""
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -2574,11 +2505,11 @@ async def export_outstanding_csv(admin_user: dict = Depends(get_admin_user)):
 @api_router.get("/admin/export/customers-csv")
 async def export_customers_csv(admin_user: dict = Depends(get_admin_user)):
     """Export customer analytics as CSV."""
-    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(10000)
+    users = await sdb.find_many("users", exclude_fields=["password"])
 
     # Batch fetch all bills and plans
-    all_bills = await db.bills.find({}, {"_id": 0}).to_list(100000)
-    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
+    all_bills = await sdb.find_many("bills", {})
+    all_plans = await sdb.find_many("payment_plans", {})
     bills_by_user = {}
     for b in all_bills:
         bills_by_user.setdefault(b.get("user_id"), []).append(b)
@@ -2614,7 +2545,7 @@ async def export_customers_csv(admin_user: dict = Depends(get_admin_user)):
 @api_router.get("/admin/export/outstanding-pdf")
 async def export_outstanding_pdf(admin_user: dict = Depends(get_admin_user)):
     """Export outstanding bills as PDF report."""
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20*mm, bottomMargin=20*mm, leftMargin=15*mm, rightMargin=15*mm)
@@ -2665,10 +2596,10 @@ async def export_outstanding_pdf(admin_user: dict = Depends(get_admin_user)):
 @api_router.get("/admin/export/financial-pdf")
 async def export_financial_pdf(admin_user: dict = Depends(get_admin_user)):
     """Export financial overview as PDF report."""
-    all_plans = await db.payment_plans.find({}, {"_id": 0}).to_list(10000)
-    all_pending = await db.bills.find({"status": "pending"}, {"_id": 0}).to_list(10000)
-    all_paid = await db.bills.find({"status": "paid"}, {"_id": 0}).to_list(10000)
-    all_users = await db.users.count_documents({})
+    all_plans = await sdb.find_many("payment_plans", {})
+    all_pending = await sdb.find_many("bills", {"status": "pending"})
+    all_paid = await sdb.find_many("bills", {"status": "paid"})
+    all_users = await sdb.count_documents("users", {})
     active_plans = [p for p in all_plans if p.get("status") == "active"]
 
     total_collected = sum(p.get("total_collected", 0) for p in all_plans)
@@ -2757,14 +2688,13 @@ async def encrypt_existing_data(admin_user: dict = Depends(get_admin_user)):
     migrated = {"bank_details": 0, "ddr_mandates": 0, "payment_methods": 0}
 
     # Migrate bank_details
-    bank_docs = await db.bank_details.find({}, {"_id": 1, "account_number": 1, "routing_number": 1}).to_list(10000)
+    bank_docs = await sdb.find_many("bank_details")
     for doc in bank_docs:
         acct = doc.get("account_number", "")
         rout = doc.get("routing_number", "")
-        # Skip if already encrypted (Fernet tokens start with 'gAAAAA')
         if acct and not acct.startswith("gAAAAA"):
-            await db.bank_details.update_one(
-                {"_id": doc["_id"]},
+            await sdb.update_one("bank_details",
+                {"id": doc["id"]},
                 {"$set": {
                     "account_number": encrypt_field(acct),
                     "routing_number": encrypt_field(rout)
@@ -2773,29 +2703,26 @@ async def encrypt_existing_data(admin_user: dict = Depends(get_admin_user)):
             migrated["bank_details"] += 1
 
     # Migrate DDR mandates
-    ddr_docs = await db.direct_debit_requests.find(
-        {}, {"_id": 1, "bsb": 1, "account_number": 1, "provider_account_number": 1}
-    ).to_list(10000)
+    ddr_docs = await sdb.find_many("direct_debit_requests")
     for doc in ddr_docs:
         bsb = doc.get("bsb", "")
         if bsb and not bsb.startswith("gAAAAA"):
-            await db.direct_debit_requests.update_one(
-                {"_id": doc["_id"]},
+            await sdb.update_one("direct_debit_requests",
+                {"id": doc["id"]},
                 {"$set": {
                     "bsb": encrypt_field(bsb),
-                    "account_number": encrypt_field(doc.get("account_number", "")),
-                    "provider_account_number": encrypt_field(doc.get("provider_account_number", ""))
+                    "account_number": encrypt_field(doc.get("account_number", ""))
                 }}
             )
             migrated["ddr_mandates"] += 1
 
     # Migrate payment_methods BSB
-    pm_docs = await db.payment_methods.find({}, {"_id": 1, "bsb": 1}).to_list(10000)
+    pm_docs = await sdb.find_many("payment_methods")
     for doc in pm_docs:
         bsb = doc.get("bsb")
         if bsb and not bsb.startswith("gAAAAA"):
-            await db.payment_methods.update_one(
-                {"_id": doc["_id"]},
+            await sdb.update_one("payment_methods",
+                {"id": doc["id"]},
                 {"$set": {"bsb": encrypt_field(bsb)}}
             )
             migrated["payment_methods"] += 1
@@ -2940,8 +2867,7 @@ _INSIGHTS_TTL = 900  # 15 minutes
 @api_router.get("/insights/analyze")
 async def get_bill_insights(user=Depends(get_current_user)):
     """AI-powered bill intelligence - spending analysis, trends, and savings suggestions."""
-    bills_cursor = db.bills.find({"user_id": user["id"]}, {"_id": 0})
-    bills = await bills_cursor.to_list(500)
+    bills = await sdb.find_many("bills", {"user_id": user["id"]})
 
     if not bills:
         return {
@@ -3058,7 +2984,7 @@ from billing_engine import (
 @api_router.get("/v2/predict-bills")
 async def v2_predict_bills(current_user: dict = Depends(get_current_user)):
     """12-month bill forecast with seasonal weighting."""
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     if not bills:
         return {"prediction": None, "message": "No bills to predict."}
     return {"prediction": predict_annual_bills(bills)}
@@ -3073,12 +2999,12 @@ async def v2_simulate_plan(
     if frequency not in ("weekly", "fortnightly", "monthly"):
         raise HTTPException(status_code=400, detail="Invalid frequency")
 
-    bills = await db.bills.find({"user_id": current_user["id"], "status": "pending"}, {"_id": 0}).to_list(500)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
     if not bills:
         return {"simulation": None, "message": "No pending bills."}
 
     # Determine buffer based on user subscription tier
-    user_sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    user_sub = await sdb.find_one("subscriptions", {"user_id": current_user["id"]})
     tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
     tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
     buffer_pct = tier["buffer_pct"]
@@ -3090,13 +3016,13 @@ async def v2_simulate_plan(
 @api_router.get("/v2/plan-health")
 async def v2_plan_health(current_user: dict = Depends(get_current_user)):
     """Excess/deficit balancing — is the plan on track?"""
-    plan = await db.payment_plans.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"]})
     if not plan or plan.get("status") != "active":
         return {"health": None, "message": "No active plan."}
 
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
-    transactions = await db.transactions.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(1000)
-    user = await db.users.find_one({"id": current_user["id"]}, {"_id": 0})
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
+    transactions = await sdb.find_many("transactions", {"user_id": current_user["id"]})
+    user = await sdb.find_one("users", {"id": current_user["id"]})
 
     health = compute_plan_health(plan, bills, user.get("wallet_balance", 0), transactions)
     return {"health": health}
@@ -3105,11 +3031,11 @@ async def v2_plan_health(current_user: dict = Depends(get_current_user)):
 @api_router.get("/v2/savings-comparison")
 async def v2_savings_comparison(current_user: dict = Depends(get_current_user)):
     """Compare smoothed vs traditional billing."""
-    bills = await db.bills.find({"user_id": current_user["id"]}, {"_id": 0}).to_list(500)
+    bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     if not bills:
         return {"comparison": None, "message": "No bills to compare."}
 
-    user_sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    user_sub = await sdb.find_one("subscriptions", {"user_id": current_user["id"]})
     tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
     tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
 
@@ -3126,7 +3052,7 @@ async def v2_get_subscription_tiers():
 @api_router.get("/v2/subscription/current")
 async def v2_get_current_subscription(current_user: dict = Depends(get_current_user)):
     """Get user's current subscription."""
-    sub = await db.subscriptions.find_one({"user_id": current_user["id"]}, {"_id": 0})
+    sub = await sdb.find_one("subscriptions", {"user_id": current_user["id"]})
     if not sub:
         return {"subscription": SUBSCRIPTION_TIERS["basic"], "tier": "basic"}
     tier = SUBSCRIPTION_TIERS.get(sub.get("tier", "basic"), SUBSCRIPTION_TIERS["basic"])
@@ -3145,10 +3071,8 @@ async def v2_select_subscription(tier: str, current_user: dict = Depends(get_cur
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "active",
     }
-    await db.subscriptions.delete_many({"user_id": current_user["id"]})
-    await db.subscriptions.insert_one(sub_doc)
-    sub_doc.pop("_id", None)
-
+    await sdb.delete_many("subscriptions", {"user_id": current_user["id"]})
+    await sdb.insert_one("subscriptions", sub_doc)
     return {
         "message": f"Subscribed to {SUBSCRIPTION_TIERS[tier]['name']} plan",
         "subscription": SUBSCRIPTION_TIERS[tier],
@@ -3182,4 +3106,4 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    client.close()
+    pass  # Supabase client handles its own cleanup
