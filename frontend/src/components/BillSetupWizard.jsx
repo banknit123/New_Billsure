@@ -117,7 +117,17 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
         axiosInstance.get(`${API}/payment-plan/calculate`),
         axiosInstance.get(`${API}/payment-plan/current`),
       ]);
-      setCalcData(calcRes.data);
+      // Flatten options array to {weekly: amount, fortnightly: amount, monthly: amount}
+      const raw = calcRes.data;
+      const flat = {};
+      if (raw.options) {
+        raw.options.forEach(o => { flat[o.frequency] = o.amount; });
+      } else {
+        flat.weekly = raw.weekly;
+        flat.fortnightly = raw.fortnightly;
+        flat.monthly = raw.monthly;
+      }
+      setCalcData(flat);
       setCurrentPlan(planRes.data.status === 'none' ? null : planRes.data);
     } catch {} finally { setPlanLoading(false); }
   }, []);

@@ -1210,17 +1210,6 @@ async def disconnect_provider(connection_id: str, current_user: dict = Depends(g
     return {"message": "Provider disconnected successfully"}
 
 # Admin routes
-async def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Admin authentication middleware"""
-    token = credentials.credentials
-    payload = decode_token(token)
-    user_id = payload.get("user_id")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    user = await sdb.find_one("users", {"id": user_id})
-    if user is None or not user.get("is_admin", False):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return user
 
 @api_router.get("/admin/stats")
 async def get_admin_stats(admin_user: dict = Depends(get_admin_user)):
