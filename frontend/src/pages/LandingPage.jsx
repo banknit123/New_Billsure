@@ -134,7 +134,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 cursor-pointer"
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} data-testid="landing-logo">
-            <img src="/logo.png" alt="BillSure" className="h-9 rounded" />
+            <img src="/logo-horizontal.png" alt="BillSure" className="h-11" />
           </div>
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-6">
@@ -621,9 +621,9 @@ export default function LandingPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
             {/* Brand */}
             <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-3" style={{ fontFamily: 'Outfit' }}>BillSure</h3>
+              <img src="/logo-icon.png" alt="BillSure" className="w-12 h-12 rounded-lg mb-3" />
               <p className="text-sm text-slate-500 leading-relaxed mb-4">
-                Australia's smart bill management platform. One fixed payment covers all your bills.
+                Australia's smart bill management platform. Never be surprised by a bill again.
               </p>
               <div className="flex items-center gap-2">
                 <Shield size={14} className="text-green-600" />

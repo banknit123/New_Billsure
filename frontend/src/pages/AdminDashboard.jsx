@@ -33,7 +33,7 @@ export default function AdminDashboard() {
       `}>
         <div className="px-5 h-16 flex items-center justify-between border-b border-slate-200">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="BillSure" className="h-7 rounded" />
+            <img src="/logo-horizontal.png" alt="BillSure" className="h-9" />
             <span className="text-xs font-semibold text-teal bg-teal-50 px-2 py-0.5 rounded">Admin</span>
           </div>
           <button className="lg:hidden text-slate-500 hover:text-slate-900" onClick={closeSidebar}>

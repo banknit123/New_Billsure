@@ -104,12 +104,12 @@ export default function Register() {
       </div>
       <div className="hidden lg:block lg:w-[45%] bg-navy relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-[#002855] via-[#003470] to-[#002040]" />
-        <div className="relative z-10 h-full flex flex-col justify-center px-16">
-          <p className="text-xs tracking-widest uppercase text-teal mb-3">Get Started</p>
-          <h2 className="text-3xl font-bold text-white mb-4" style={{ fontFamily: 'Outfit, sans-serif' }}>
+        <div className="relative z-10 h-full flex flex-col justify-center items-center px-16">
+          <img src="/logo-icon.png" alt="BillSure" className="w-28 h-28 mb-8 drop-shadow-2xl" />
+          <h2 className="text-3xl font-bold text-white mb-3 text-center" style={{ fontFamily: 'Outfit, sans-serif' }}>
             Take control of your bills today
           </h2>
-          <p className="text-slate-400 text-sm leading-relaxed">
+          <p className="text-slate-400 text-sm leading-relaxed text-center max-w-xs">
             Join thousands managing their bills with predictable, smoothed payments.
           </p>
         </div>

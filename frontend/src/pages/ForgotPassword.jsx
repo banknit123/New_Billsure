@@ -50,8 +50,8 @@ export default function ForgotPassword() {
           </div>
         ) : (
           <>
-            <div className="w-14 h-14 rounded-full bg-teal-50 flex items-center justify-center mb-6">
-              <Mail size={24} className="text-teal" />
+            <div className="w-14 h-14 rounded-xl overflow-hidden mb-6">
+              <img src="/logo-icon.png" alt="BillSure" className="w-full h-full object-cover" />
             </div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight mb-1" style={{ fontFamily: 'Outfit, sans-serif' }}>
               Reset your password
