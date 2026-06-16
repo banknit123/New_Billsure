@@ -52,41 +52,14 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str):
-    """Decode either a custom JWT or a Supabase JWT token."""
-    # Try custom JWT first
+    """Decode a custom JWT token."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-        pass
-
-    # Try Supabase JWT (signed with Supabase JWT secret)
-    if SUPABASE_JWT_SECRET:
-        try:
-            payload = jwt.decode(
-                token,
-                SUPABASE_JWT_SECRET,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
-            return payload
-        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-            pass
-
-    # Try Supabase JWT without audience verification (fallback)
-    if SUPABASE_JWT_SECRET:
-        try:
-            payload = jwt.decode(
-                token,
-                SUPABASE_JWT_SECRET,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
-            )
-            return payload
-        except Exception:
-            pass
-
-    raise HTTPException(status_code=401, detail="Token has expired or is invalid")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -107,13 +80,17 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     sb = get_supabase_admin()
     if sb:
         try:
-            auth_response = sb.auth.admin.get_user(token)
+            auth_response = sb.auth.get_user(token)
             if auth_response and auth_response.user:
                 sb_user = auth_response.user
                 # Find by supabase_uid or email
                 user = await sdb.find_one("users", {"supabase_uid": sb_user.id})
                 if not user and sb_user.email:
                     user = await sdb.find_one("users", {"email": sb_user.email})
+                    # Link supabase_uid
+                    if user and not user.get("supabase_uid"):
+                        await sdb.update_one("users", {"id": user["id"]}, {"$set": {"supabase_uid": sb_user.id}})
+                        user["supabase_uid"] = sb_user.id
                 if user:
                     return user
         except Exception as e:

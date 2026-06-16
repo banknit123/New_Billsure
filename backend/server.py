@@ -112,6 +112,8 @@ async def register(request: Request, user_data: UserRegister):
                 "email_confirm": True,
             })
             supabase_uid = auth_res.user.id
+            # Ensure password is set correctly
+            sb.auth.admin.update_user_by_id(supabase_uid, {"password": user_data.password})
             # Sign in to get access token
             sign_in = sb.auth.sign_in_with_password({
                 "email": user_data.email,
@@ -162,7 +164,7 @@ async def login(request: Request, credentials: UserLogin):
             if user and not user.get("supabase_uid"):
                 await sdb.update_one("users", {"id": user["id"]}, {"$set": {"supabase_uid": supabase_uid}})
         except Exception as e:
-            logger.debug(f"Supabase sign-in failed, falling back to custom: {e}")
+            logger.warning(f"Supabase sign-in failed for {credentials.email}: {e}")
 
     # Lookup user in our DB
     user = await sdb.find_one("users", {"email": credentials.email})
@@ -173,7 +175,50 @@ async def login(request: Request, credentials: UserLogin):
     if not access_token:
         if not verify_password(credentials.password, user.get("password", "")):
             raise HTTPException(status_code=401, detail="Invalid email or password")
-        access_token = create_access_token({"user_id": user["id"], "email": user["email"]})
+
+        # Backfill: create Supabase Auth user with the correct plaintext password
+        if sb and not user.get("supabase_uid"):
+            try:
+                auth_res = sb.auth.admin.create_user({
+                    "email": credentials.email,
+                    "password": credentials.password,
+                    "email_confirm": True,
+                })
+                supabase_uid = auth_res.user.id
+                # Ensure password is set correctly
+                sb.auth.admin.update_user_by_id(supabase_uid, {"password": credentials.password})
+                await sdb.update_one("users", {"id": user["id"]}, {"$set": {"supabase_uid": supabase_uid}})
+                # Now sign in to get Supabase token
+                sign_in = sb.auth.sign_in_with_password({
+                    "email": credentials.email,
+                    "password": credentials.password,
+                })
+                access_token = sign_in.session.access_token
+                logger.info(f"Backfilled Supabase Auth for {credentials.email}")
+            except Exception as e:
+                err_msg = str(e)
+                if "already been registered" in err_msg or "already exists" in err_msg.lower():
+                    # User exists in Supabase Auth but not linked — find and link
+                    try:
+                        sb_users = sb.auth.admin.list_users()
+                        for sb_user in sb_users:
+                            if sb_user.email == credentials.email:
+                                sb.auth.admin.update_user_by_id(sb_user.id, {"password": credentials.password})
+                                await sdb.update_one("users", {"id": user["id"]}, {"$set": {"supabase_uid": sb_user.id}})
+                                sign_in = sb.auth.sign_in_with_password({
+                                    "email": credentials.email,
+                                    "password": credentials.password,
+                                })
+                                access_token = sign_in.session.access_token
+                                logger.info(f"Linked and updated Supabase Auth for {credentials.email}")
+                                break
+                    except Exception:
+                        pass
+                else:
+                    logger.debug(f"Supabase backfill on login: {e}")
+
+        if not access_token:
+            access_token = create_access_token({"user_id": user["id"], "email": user["email"]})
 
     user.pop("password", None)
     return {"token": access_token, "user": user}

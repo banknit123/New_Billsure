@@ -7,6 +7,8 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 - **Frontend**: React.js, TailwindCSS, Shadcn UI, Recharts, Lucide-React
 - **Backend**: FastAPI, Supabase (Postgres), JWT, Passlib, pdfplumber, reportlab, emergentintegrations (Stripe + OpenAI GPT Vision), cryptography (Fernet)
 - **Database**: Supabase Postgres with RLS, audit triggers, indexes
+- **Auth**: Supabase Auth (email/password) with custom JWT fallback for backward compatibility
+- **Password Reset**: Built-in via Supabase Auth recovery flow (/forgot-password)
 - **Payments**: Stripe Checkout (Card + BECS Direct Debit ready), Admin BPAY/bank payments
 - **Bill Extraction**: pdfplumber (text PDFs) + GPT-4o Vision (images/scanned PDFs) + Accurassi API
 - **Encryption**: Fernet (AES-128-CBC)
@@ -60,7 +62,6 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
 - **UI Library**: Shadcn UI + TailwindCSS + Recharts
 
 ## Pending / Backlog
-- P1: Supabase Auth migration (replace custom JWT with Supabase built-in auth — playbook ready)
 - P2: Further refactor server.py routes into separate route files
 - P2: Add GET /api/health endpoint for monitoring
 - P3: Cache subscription tier per-request to reduce DB calls
