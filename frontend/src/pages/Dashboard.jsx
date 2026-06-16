@@ -15,11 +15,11 @@ import { LayoutDashboard, FileText, Calculator, CreditCard, Settings, LogOut, Sh
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Overview', end: true },
   { to: '/dashboard/bills', icon: FileText, label: 'Bills' },
-  { to: '/dashboard/insights', icon: Sparkles, label: 'Bill Intelligence' },
+  { to: '/dashboard/insights', icon: Sparkles, label: 'Insights' },
   { to: '/dashboard/forecast', icon: TrendingUp, label: 'Annual Plan' },
   { to: '/dashboard/payment-plan', icon: Calculator, label: 'Payment Plan' },
   { to: '/dashboard/payment-methods', icon: CreditCard, label: 'Payment Methods' },
-  { to: '/dashboard/subscription', icon: Crown, label: 'Subscription' },
+  { to: '/dashboard/subscription', icon: Crown, label: 'Plan' },
   { to: '/dashboard/settings', icon: Settings, label: 'Settings' },
 ];
 

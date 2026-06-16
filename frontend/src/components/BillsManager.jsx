@@ -2,22 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, Trash2, Search, FileText, ScanLine } from 'lucide-react';
-import BillUploadDialog from './BillUploadDialog';
-import AccurassiBillExtractor from './AccurassiBillExtractor';
+import { Plus, Trash2, FileText, Check, Clock, AlertTriangle } from 'lucide-react';
+import BillSetupWizard from './BillSetupWizard';
 
-const CATEGORIES = ['Electricity','Water','Gas','Internet','Mobile','Council','Insurance','School Fees','Tuition Fees','Other'];
+const STATUS_STYLES = {
+  paid: { icon: Check, color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'Paid' },
+  pending: { icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50', label: 'Pending' },
+  overdue: { icon: AlertTriangle, color: 'text-red-600', bg: 'bg-red-50', label: 'Overdue' },
+};
 
 const BillsManager = ({ user, refreshUser }) => {
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [showUpload, setShowUpload] = useState(false);
-  const [showManual, setShowManual] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
   useEffect(() => { fetchBills(); }, []);
@@ -36,138 +34,89 @@ const BillsManager = ({ user, refreshUser }) => {
       toast.success('Bill removed');
       fetchBills();
       refreshUser();
-    } catch (err) {
-      toast.error('Failed to delete');
-    } finally { setDeleting(null); }
+    } catch { toast.error('Failed to delete'); }
+    finally { setDeleting(null); }
   };
 
-  const filtered = bills.filter(b => {
-    if (filter !== 'all' && b.status !== filter) return false;
-    if (search && !b.provider?.toLowerCase().includes(search.toLowerCase()) &&
-        !b.category?.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
-
-  const pending = bills.filter(b => b.status === 'pending');
-  const totalPending = pending.reduce((s, b) => s + (b.amount || 0), 0);
+  if (showWizard) {
+    return (
+      <div data-testid="bills-wizard-view">
+        <button onClick={() => setShowWizard(false)} className="text-xs text-slate-400 hover:text-teal mb-4 transition-colors" data-testid="back-to-bills-list">
+          ← Back to bills list
+        </button>
+        <BillSetupWizard user={user} refreshUser={refreshUser} onComplete={() => { setShowWizard(false); fetchBills(); }} />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6" data-testid="bills-manager">
-      {/* Header */}
+    <div className="space-y-5" data-testid="bills-page">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
-            Bills
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            {bills.length} total &middot; {pending.length} pending &middot; ${totalPending.toFixed(2)} outstanding
-          </p>
+          <h2 className="text-xl font-bold text-slate-900" style={{ fontFamily: 'Outfit, sans-serif' }}>My Bills</h2>
+          <p className="text-sm text-slate-500 mt-0.5">{bills.length} bill{bills.length !== 1 ? 's' : ''} tracked</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowManual(true)} data-testid="add-bill-manual-btn"
-            className="border-slate-300 text-slate-700 text-sm">
-            <Plus size={16} className="mr-1" /> Add Manually
-          </Button>
-        </div>
+        <Button onClick={() => setShowWizard(true)} className="bg-teal text-white hover:bg-teal-600 text-sm" data-testid="add-bill-btn">
+          <Plus size={16} className="mr-1.5" /> Add Bill
+        </Button>
       </div>
 
-      {/* Scan / Upload Card */}
-      <AccurassiBillExtractor user={user} refreshUser={() => { refreshUser(); fetchBills(); }} />
-
-      {/* Filters */}
-      <div className="flex gap-3 items-center">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input placeholder="Search bills..." value={search} onChange={e => setSearch(e.target.value)}
-            className="pl-9 h-10 border-slate-200" data-testid="bills-search-input" />
+      {loading ? (
+        <div className="space-y-3">
+          {[...Array(3)].map((_, i) => <div key={i} className="h-20 bg-white rounded-xl border border-slate-200 animate-pulse" />)}
         </div>
-        <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="w-40 h-10 border-slate-200" data-testid="bills-filter-select">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Bills Table */}
-      <Card className="border-slate-200 shadow-sm">
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-8 text-center text-slate-400">Loading...</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-12 text-center">
-              <FileText className="mx-auto text-slate-300 mb-3" size={40} />
-              <p className="text-slate-500 text-sm">No bills found</p>
-              <p className="text-xs text-slate-400 mt-1">Upload a bill or add one manually</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full" data-testid="bills-table">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Provider</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Category</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Biller Code</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Reference</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Amount</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Due Date</th>
-                    <th className="text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-6 py-3">Status</th>
-                    <th className="px-6 py-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map(bill => (
-                    <tr key={bill.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors" data-testid={`bill-row-${bill.id}`}>
-                      <td className="px-6 py-4">
-                        <p className="text-sm font-medium text-slate-900">{bill.provider}</p>
-                        <p className="text-xs text-slate-500">{bill.account_number}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-xs font-medium px-2 py-1 rounded-md bg-slate-100 text-slate-700">
-                          {bill.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-700 font-mono" data-testid={`bill-biller-code-${bill.id}`}>
-                        {bill.biller_code || bill.bpay_code || <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-700 font-mono" data-testid={`bill-reference-${bill.id}`}>
-                        {bill.reference_number || <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-6 py-4 text-sm font-semibold text-slate-900">${bill.amount?.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-sm text-slate-600">{bill.due_date?.slice(0, 10)}</td>
-                      <td className="px-6 py-4">
-                        <span className={`text-xs font-medium px-2 py-1 rounded-md ${
-                          bill.status === 'paid' ? 'bg-green-50 text-green-700' :
-                          bill.status === 'pending' ? 'bg-amber-50 text-amber-700' :
-                          'bg-red-50 text-red-700'
-                        }`}>
-                          {bill.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        {bill.status === 'pending' && (
-                          <button onClick={() => deleteBill(bill.id)} disabled={deleting === bill.id}
-                            className="text-slate-400 hover:text-red-500 transition-colors"
-                            data-testid={`delete-bill-${bill.id}`}>
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Manual Add Dialog */}
-      <BillUploadDialog open={showManual} onOpenChange={setShowManual} onBillAdded={() => { fetchBills(); refreshUser(); }} />
+      ) : bills.length === 0 ? (
+        <Card className="border-slate-200" data-testid="no-bills">
+          <CardContent className="p-12 text-center">
+            <FileText className="mx-auto mb-4 text-slate-300" size={48} />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>No Bills Yet</h3>
+            <p className="text-sm text-slate-500 mb-4">Upload your first bill to get started with smart payment smoothing.</p>
+            <Button onClick={() => setShowWizard(true)} className="bg-teal text-white hover:bg-teal-600">
+              <Plus size={16} className="mr-1.5" /> Add Your First Bill
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {bills.map(bill => {
+            const st = STATUS_STYLES[bill.status] || STATUS_STYLES.pending;
+            const StIcon = st.icon;
+            return (
+              <Card key={bill.id} className="border-slate-200 hover:shadow-sm transition-shadow" data-testid={`bill-${bill.id}`}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className={`w-9 h-9 rounded-lg ${st.bg} flex items-center justify-center flex-shrink-0`}>
+                        <StIcon size={16} className={st.color} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{bill.provider}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                          <span>{bill.category}</span>
+                          <span>·</span>
+                          <span>Due {bill.due_date}</span>
+                          <span>·</span>
+                          <span className="capitalize">{bill.frequency}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-slate-900">${bill.amount?.toFixed(2)}</p>
+                        <span className={`text-[10px] font-medium ${st.color}`}>{st.label}</span>
+                      </div>
+                      <button onClick={() => deleteBill(bill.id)} disabled={deleting === bill.id}
+                        className="text-slate-300 hover:text-red-500 transition-colors p-1" data-testid={`delete-bill-${bill.id}`}>
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };

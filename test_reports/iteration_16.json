@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 16: Validated BillSure UX overhaul — 4-step Bill Setup Wizard. Backend pytest (test_wizard_flow.py): 11/14 PASS. Core wizard flow APIs all work: customer+admin login ✓, POST /api/bills creates bill ✓ (id, provider, amount echoed), POST /api/payment-methods bank_account (with bank_name + bsb + masked account) returns 200 ✓ (NO 500 regression), POST /api/payment-methods debit_card stores card_last4 + card_brand ✓, GET /api/payment-methods lists them ✓, POST /api/bills/extract (multipart PDF) returns extracted fields (provider='AGL', amount=125.5, due_date='2026-02-15', biller_code, account_number) ✓ — no 500, no missing-status-endpoint regression. Frontend E2E (Playwright): /dashboard/bills loads with [data-testid='bills-page'] + add-bill-btn ✓ → click opens [data-testid='bill-setup-wizard'] with progress bar ✓ → wizard-step-upload renders with file area + manual-entry-link ✓ → manual link auto-advances to wizard-step-review with empty form (all 5 testids present: bill-category, bill-provider, bill-amount, bill-due-date, confirm-bill-btn) ✓ → Category Shadcn Select opens and 'Electricity' selects cleanly ✓ → form submit calls POST /api/bills → auto-advances to wizard-step-plan ✓ → step 3 plan options render (plan-weekly/fortnightly/monthly testids present) BUT $ amounts are blank (see HIGH bug below). Created bill cleaned up. NO console errors during full wizard run.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/admin/stats (and ALL /api/admin/* endpoints)", "issue": "Returns 401 'Invalid token' for valid admin login token. ROOT CAUSE: server.py:1213 REDEFINES get_admin_user() locally, SHADOWING the one imported from utils.auth. The local version only uses decode_token() (custom HS256 JWT) and does NOT support Supabase ES256 tokens. Admin user admin@billseasypay.com now has supabase_uid linked so /api/auth/login issues a Supabase JWT — local get_admin_user can't decode it. /api/auth/me works (uses utils.auth.get_current_user with Supabase fallback). FIX: delete the duplicate get_admin_user at server.py:1213-1223 so the imported one (which supports both token types) is used.", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/bills/extract", "issue": "Response omits 'category' field entirely (rest of fields: provider, amount, due_date, account_number, biller_code, bpay_code, frequency all present). Frontend wizard expects d.category for auto-fill — currently leaves category empty. Recommend always returning category=null instead of dropping the key."},
+      {"endpoint": "GET /api/payment-plan/calculate", "issue": "Returns nested {options: [{frequency,amount,...}]} but BillSetupWizard.jsx (line 320-324) reads flat calcData.weekly / .fortnightly / .monthly — see frontend issue. Either flatten the API response or fix the UI."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BillSetupWizard step 3 (Payment Plan)", "issue": "Plan option cards render Weekly/Fortnightly/Monthly labels but the $ AMOUNT IS BLANK (shows only '$' icon and 'inc. 8% buffer'). Cause: component does calcData.weekly?.toFixed(2) but the API returns {options:[{frequency:'weekly', amount:245.11}, ...]}. Need to map either calcData.options.find(o=>o.frequency==='weekly').amount OR change backend to also return flat keys. Buttons remain clickable so flow still works, but user has no idea how much they'll pay.", "selector": "[data-testid='plan-weekly'] $ amount", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_wizard_flow.py",
+    "/app/test_reports/pytest/iter16_wizard.xml"
+  ],
+  "action_items": [
+    "FIX (CRITICAL): Delete duplicate get_admin_user() in /app/backend/server.py:1213-1223 so the utils.auth version (which handles both custom + Supabase JWT) is used. Currently every /api/admin/* endpoint returns 401 for the seeded admin user.",
+    "FIX (HIGH): BillSetupWizard.jsx step 3 — read calcData.options[].amount instead of calcData.weekly/.fortnightly/.monthly. Currently $ amounts are blank in the plan-selection cards. Quick fix: const byFreq = Object.fromEntries((calcData.options||[]).map(o=>[o.frequency,o.amount])); then use byFreq.weekly etc.",
+    "FIX (MINOR): /api/bills/extract should always include 'category' key (even if null) so frontend can reset the Select cleanly.",
+    "Carry-over from iter15: utils/auth.py SUPABASE_JWT_SECRET undefined name; passlib bcrypt warning; server.py size 3004 lines."
+  ],
+  "critical_code_review_comments": [
+    "DUPLICATE FUNCTION: server.py imports get_admin_user from utils.auth (line 47) then redefines it (line 1213). The local one wins via Python scoping and breaks Supabase token support. Lint/code-review process missed this.",
+    "API/UI contract mismatch: payment-plan/calculate returns nested options array but BillSetupWizard expects flat keys — no type/shape contract between BE and FE, easy to miss.",
+    "/api/bills/extract returns a dict shaped by whichever extraction path succeeded (pdfplumber vs vision) — fields are inconsistent (category, frequency may be missing). Recommend returning a normalised Pydantic model.",
+    "server.py is still 3004 lines — overdue for routes/ split.",
+    "BillSetupWizard.jsx 452 lines — fine, but four wizard-step blocks could be extracted into <Step1/>...<Step4/> sub-components for readability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_wizard_flow.py (new — 14 pytest tests covering wizard backend flow: auth, /bills/extract, /bills CRUD, /payment-methods bank+card, /payment-plan, /admin/stats)"
+  ],
+  "success_rate": {"backend": "79% (11/14 pytest — 3 failures: admin/stats 401, calc shape mismatch, extract missing category)", "frontend": "90% (full wizard E2E works step1→2→3, only plan-amounts blank)"},
+  "test_credentials": {
+    "customer": "test@billseasypay.com / Test123! (works)",
+    "admin": "admin@billseasypay.com / Admin123! (login WORKS, but all /api/admin/* return 401 due to shadowed get_admin_user)"
+  },
+  "seed_data_creation": "Created and deleted TEST_Wizard_Provider (CRUD test) + TEST_WizardE2E_Provider (frontend e2e) bills. Created and deleted TEST_Wizard_Bank + TEST_Wizard_Card payment methods (cleanup verified). One bill (97bed6aa-3c4a...) deleted via DELETE /api/bills/{id} -> 200.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Wizard flow (Bill Setup): /app/frontend/src/components/BillSetupWizard.jsx mounts via /dashboard/bills -> Add Bill button -> [data-testid='bill-setup-wizard']. Steps render correctly with auto-advance (file extract OR manual entry -> review -> save bill -> plan -> payment method -> finish). PRIMARY BUGS: (1) admin endpoints 401 because of duplicate get_admin_user in server.py:1213 — fix by deleting lines 1213-1223. (2) wizard step 3 amounts blank — fix BillSetupWizard.jsx line 320-324 to map calcData.options array. Backend test file /app/backend/tests/test_wizard_flow.py (run with `cd /app && python -m pytest backend/tests/test_wizard_flow.py -v`). Existing payment plan was cleared during testing (Step 3 fell through to options instead of 'Plan Active' notice) — recreate one if iter17 needs the existing-plan-notice path.",
+  "rca of the issue": {
+    "admin_401": "server.py imports get_admin_user from utils.auth at line 47 but defines its own at line 1213 (only does decode_token for custom JWT). Python late-binding means every @api_router.get('/admin/*') decorator's Depends(get_admin_user) resolves to the LOCAL function. Admin user now logs in via Supabase Auth (token starts with eyJhbGciOiJFUzI1NiI — ES256), local decode_token uses HS256+SECRET_KEY, decode throws InvalidTokenError -> 401. Reproduction: POST /api/auth/login admin -> token; GET /api/admin/stats with Bearer token -> {\"detail\":\"Invalid token\"} 401. Fix: delete server.py:1213-1223.",
+    "plan_amounts_blank": "API contract drift: /api/payment-plan/calculate returns {options:[{frequency,amount}]} but UI reads calcData.weekly. Reproduction: log in as test@billseasypay.com (no active plan), open Add Bill wizard, fill form, Confirm — Step 3 shows Weekly/Fortnightly/Monthly cards with empty $ amounts. Fix: map options to flat dict in fetchPlanData() or change backend to also expose weekly/fortnightly/monthly numeric keys."
+  }
+}
