@@ -45,7 +45,7 @@ from models.schemas import (
 from utils.auth import (
     hash_password, verify_password, create_access_token, decode_token,
     get_current_user, get_admin_user, encrypt_field, decrypt_field,
-    send_email, RESEND_API_KEY, SENDER_EMAIL,
+    send_email, RESEND_API_KEY, SENDER_EMAIL, get_supabase_admin,
     security, pwd_context, SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_HOURS,
 )
 
@@ -91,15 +91,38 @@ async def root():
     return {"message": "BillEasyPay API is running"}
 
 # Auth routes
+
 @api_router.post("/auth/register")
 @limiter.limit("5/minute")
 async def register(request: Request, user_data: UserRegister):
-    # Check if user exists
+    # Check if user exists in our DB
     existing_user = await sdb.find_one("users", {"email": user_data.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user
+
+    # Create Supabase Auth user
+    sb = get_supabase_admin()
+    supabase_uid = None
+    access_token = None
+    if sb:
+        try:
+            auth_res = sb.auth.admin.create_user({
+                "email": user_data.email,
+                "password": user_data.password,
+                "email_confirm": True,
+            })
+            supabase_uid = auth_res.user.id
+            # Sign in to get access token
+            sign_in = sb.auth.sign_in_with_password({
+                "email": user_data.email,
+                "password": user_data.password,
+            })
+            access_token = sign_in.session.access_token
+        except Exception as e:
+            logger.warning(f"Supabase Auth create failed: {e}")
+            # Continue with custom JWT fallback
+
+    # Create app user record
     hashed_password = hash_password(user_data.password)
     user = User(
         email=user_data.email,
@@ -108,28 +131,79 @@ async def register(request: Request, user_data: UserRegister):
     )
     user_dict = user.model_dump()
     user_dict["password"] = hashed_password
-    
+    if supabase_uid:
+        user_dict["supabase_uid"] = supabase_uid
+
     await sdb.insert_one("users", user_dict)
-    
-    # Create token
-    token = create_access_token({"user_id": user.id, "email": user.email})
-    
-    return {"token": token, "user": user}
+
+    # Use Supabase token if available, else custom JWT
+    if not access_token:
+        access_token = create_access_token({"user_id": user.id, "email": user.email})
+
+    return {"token": access_token, "user": user}
 
 @api_router.post("/auth/login")
 @limiter.limit("10/minute")
 async def login(request: Request, credentials: UserLogin):
-    user = await sdb.find_one("users", {"email": credentials.email})
-    if not user or not verify_password(credentials.password, user.get("password", "")):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    token = create_access_token({"user_id": user["id"], "email": user["email"]})
-    user.pop("password", None)
-    
-    return {"token": token, "user": user}
+    # Try Supabase Auth sign-in first
+    sb = get_supabase_admin()
+    access_token = None
+    if sb:
+        try:
+            sign_in = sb.auth.sign_in_with_password({
+                "email": credentials.email,
+                "password": credentials.password,
+            })
+            access_token = sign_in.session.access_token
+            supabase_uid = sign_in.user.id
 
-@api_router.get("/auth/me", response_model=User)
+            # Link supabase_uid if not yet linked
+            user = await sdb.find_one("users", {"email": credentials.email})
+            if user and not user.get("supabase_uid"):
+                await sdb.update_one("users", {"id": user["id"]}, {"$set": {"supabase_uid": supabase_uid}})
+        except Exception as e:
+            logger.debug(f"Supabase sign-in failed, falling back to custom: {e}")
+
+    # Lookup user in our DB
+    user = await sdb.find_one("users", {"email": credentials.email})
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # If Supabase sign-in failed, verify password locally
+    if not access_token:
+        if not verify_password(credentials.password, user.get("password", "")):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        access_token = create_access_token({"user_id": user["id"], "email": user["email"]})
+
+    user.pop("password", None)
+    return {"token": access_token, "user": user}
+
+@api_router.post("/auth/forgot-password")
+@limiter.limit("3/minute")
+async def forgot_password(request: Request, body: dict):
+    """Send password reset email via Supabase Auth."""
+    email = body.get("email", "")
+    sb = get_supabase_admin()
+    if not sb:
+        raise HTTPException(status_code=503, detail="Password reset not available")
+
+    user = await sdb.find_one("users", {"email": email})
+    if not user:
+        return {"message": "If that email is registered, a reset link has been sent."}
+
+    try:
+        sb.auth.admin.generate_link({
+            "type": "recovery",
+            "email": email,
+        })
+    except Exception as e:
+        logger.warning(f"Password reset failed: {e}")
+
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+@api_router.get("/auth/me")
 async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    current_user.pop("password", None)
     return current_user
 
 # Bill routes
@@ -2787,9 +2861,22 @@ logger = logging.getLogger(__name__)
 @app.on_event("startup")
 async def startup_event():
     """Seed admin/test user and start background schedulers."""
+    sb = get_supabase_admin()
+
     # Seed admin user if not exists
     admin = await sdb.find_one("users", {"email": "admin@billseasypay.com"})
     if not admin:
+        supabase_uid = None
+        if sb:
+            try:
+                auth_res = sb.auth.admin.create_user({
+                    "email": "admin@billseasypay.com",
+                    "password": "Admin123!",
+                    "email_confirm": True,
+                })
+                supabase_uid = auth_res.user.id
+            except Exception as e:
+                logger.warning(f"Admin Supabase auth seed: {e}")
         admin_dict = {
             "id": str(uuid.uuid4()),
             "full_name": "Admin User",
@@ -2801,6 +2888,7 @@ async def startup_event():
             "role": "admin",
             "stripe_customer_id": "",
             "subscription_fee": 0,
+            "supabase_uid": supabase_uid,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await sdb.insert_one("users", admin_dict)
@@ -2809,6 +2897,17 @@ async def startup_event():
     # Seed test customer if not exists
     test_user = await sdb.find_one("users", {"email": "test@billseasypay.com"})
     if not test_user:
+        supabase_uid = None
+        if sb:
+            try:
+                auth_res = sb.auth.admin.create_user({
+                    "email": "test@billseasypay.com",
+                    "password": "Test123!",
+                    "email_confirm": True,
+                })
+                supabase_uid = auth_res.user.id
+            except Exception as e:
+                logger.warning(f"Test user Supabase auth seed: {e}")
         test_dict = {
             "id": str(uuid.uuid4()),
             "full_name": "Test User",
@@ -2820,6 +2919,7 @@ async def startup_event():
             "role": "customer",
             "stripe_customer_id": "",
             "subscription_fee": 0,
+            "supabase_uid": supabase_uid,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await sdb.insert_one("users", test_dict)

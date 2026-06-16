@@ -64,6 +64,9 @@ export default function Login() {
             Don't have an account?{' '}
             <Link to="/register" className="text-teal hover:underline font-medium">Create one</Link>
           </p>
+          <p className="text-xs text-slate-400 text-center mt-3">
+            <Link to="/forgot-password" className="text-teal hover:underline" data-testid="forgot-password-link">Forgot your password?</Link>
+          </p>
         </div>
       </div>
       <div className="hidden lg:block lg:w-[45%] bg-navy relative overflow-hidden">

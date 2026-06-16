@@ -23,16 +23,15 @@ ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = int(os.environ.get('TOKEN_EXPIRE_HOURS', '4'))
 
 # Supabase Auth
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
-SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
-SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET', '')
-
 _supabase_admin = None
 
 def get_supabase_admin():
     global _supabase_admin
-    if _supabase_admin is None and SUPABASE_URL and SUPABASE_SERVICE_KEY:
-        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    if _supabase_admin is None:
+        url = os.environ.get('SUPABASE_URL', '')
+        key = os.environ.get('SUPABASE_SERVICE_KEY', '')
+        if url and key:
+            _supabase_admin = create_client(url, key)
     return _supabase_admin
 
 # Encryption

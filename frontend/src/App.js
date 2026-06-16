@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import LandingPage from './pages/LandingPage';
 import LegalPage from './pages/LegalPage';
+import ForgotPassword from './pages/ForgotPassword';
 
 export const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
@@ -78,6 +79,7 @@ function App() {
             element={user?.is_admin ? <AdminDashboard /> : <Navigate to="/login" />}
           />
           <Route path="/legal/:section" element={<LegalPage />} />
+          <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" /> : <ForgotPassword />} />
         </Routes>
         <Toaster richColors />
       </BrowserRouter>

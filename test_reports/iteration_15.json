@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 15: Validated Supabase Auth migration. Backend pytest: 13/13 PASS (login customer+admin, /api/auth/me, /api/bills, /api/auth/register, forgot-password known+unknown email, admin/stats, /v2/subscription/current, /v2/predict-bills). Frontend E2E: forgot-password-link visible on /login -> /forgot-password loads with email input + Send Reset Link btn -> submit shows 'Check your email' confirmation with reset-sent-message testid; customer login -> /dashboard renders fully (Total Bills 7, Outstanding $1010.95, Wallet $500, AI Bill Intelligence insight, upcoming bills); Bill Intelligence page accessible; admin login auto-redirects to /admin and Financial Overview shows data. CRITICAL FINDING: Supabase Auth is wired but ALL real auth flows fall back to custom JWT — seeded users (test@/admin@billseasypay.com) are NOT in Supabase Auth ('Invalid login credentials'), AND Supabase admin.create_user returns 'User not allowed' for new registrations (so register also falls back to custom JWT). Net behavior: works end-to-end via fallback, but the migration goal is not achieved. Also FORGOT-PASSWORD endpoint silently swallows Supabase failure ('User with this email not found') and still returns generic 200 — no real email will be sent for seeded users since they don't exist in Supabase Auth. Additional REGRESSION suspected: /dashboard/annual-plan main content area renders EMPTY for Standard user (iter14 had it showing full forecast). Backend /api/v2/predict-bills returns 200, so this looks like a frontend-only regression.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/forgot-password", "issue": "Silently returns 200 even when sb.auth.admin.generate_link fails ('User with this email not found'). For all currently-seeded users, password recovery will NOT actually send any email since they don't exist in Supabase Auth. Endpoint behaves correctly for unknown emails (intentional non-leak), but for valid app users that are NOT in Supabase Auth this gives the user a false sense that an email was sent."},
+      {"endpoint": "POST /api/auth/register", "issue": "Supabase create_user returns 'User not allowed' (likely Auth signups disabled in Supabase project settings OR rate-limited) — code silently falls back to custom JWT. supabase_uid never gets linked. Result: user is created in app DB only, defeating the Supabase Auth migration."},
+      {"endpoint": "POST /api/auth/login (existing users)", "issue": "Supabase sign_in_with_password returns 'Invalid login credentials' for test@billseasypay.com and admin@billseasypay.com because seeded users were never created in Supabase Auth. Falls back to bcrypt verification — works, but migration is no-op for existing users. Need a one-time backfill: for each app user, call sb.auth.admin.create_user with their current password (or trigger password-reset emails)."},
+      {"endpoint": "utils/auth.decode_token", "issue": "References undefined name SUPABASE_JWT_SECRET (lines 64,68,77,81). If any real Supabase JWT ever reaches decode_token() (called by get_admin_user at server.py:1171), this will raise NameError -> 500. Currently masked because no Supabase tokens are ever issued (see register/login items above). Fix: SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET','') at module load."},
+      {"endpoint": "utils/auth.get_current_user", "issue": "Uses sb.auth.admin.get_user(token) — this method does NOT exist on SyncGoTrueAdminAPI in the installed supabase-py version (AttributeError raised, then silently caught and 401 returned). Verified via direct SDK call. Use sb.auth.get_user(token) (no .admin) instead, or decode the Supabase JWT with SUPABASE_JWT_SECRET."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ForecastDashboard (/dashboard/annual-plan)", "issue": "Main content area renders EMPTY for Standard tier user test@billseasypay.com. Sidebar/header render but no forecast cards, chart, or upgrade message — page body keywords (Forecast, smoothed, Peak, Variance, Upgrade) all absent after 5s wait. /api/v2/predict-bills returns 200 in backend, so this is a frontend-only regression vs iter14.", "selector": "[data-testid='forecast-upgrade'] or forecast cards", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Forgot password for existing seeded user", "issue": "UI shows 'Check your email' success but no recovery email will ever land — seeded users are not in Supabase Auth (see backend issue above). End user will be stuck thinking reset link is coming.", "affected_selectors": ["[data-testid='reset-sent-message']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_supabase_auth_migration.py",
+    "/app/test_reports/pytest/iter15_supabase_auth.xml"
+  ],
+  "action_items": [
+    "FIX (HIGH): /dashboard/annual-plan renders empty for Standard user — verify ForecastDashboard component is mounted, check console for React errors, and confirm /api/v2/predict-bills response shape matches what UI expects. Regression vs iter14.",
+    "FIX (HIGH): Backfill existing app users into Supabase Auth — currently seeded admin & customer cannot use Supabase password-recovery because they don't exist in Supabase. Either create them in Supabase Auth via admin.create_user with current passwords, or generate password-reset links and force first-time setup.",
+    "FIX (HIGH): Investigate 'User not allowed' on sb.auth.admin.create_user during /api/auth/register — likely Supabase project setting (Auth -> Providers -> Email: enable signups, or service-role permissions). Without this, NEW users never get Supabase identity.",
+    "FIX: utils/auth.py uses undefined SUPABASE_JWT_SECRET (will NameError if a Supabase token ever reaches decode_token). Add: SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET','').",
+    "FIX: utils/auth.get_current_user calls sb.auth.admin.get_user(token) which does NOT exist in installed supabase SDK (AttributeError, silently caught). Use sb.auth.get_user(token) or verify JWT locally with SUPABASE_JWT_SECRET.",
+    "Consider surfacing Supabase failures (do not silently 200 forgot-password / silently fallback on register) at least in backend logs with WARN/ERROR level for observability."
+  ],
+  "critical_code_review_comments": [
+    "Carry-over from iter14: server.py still 2959 lines, route handlers should be split (routes/auth.py etc).",
+    "utils/auth.py: passlib bcrypt warning persists — pin bcrypt<4.",
+    "utils/auth.py: decode_token() references SUPABASE_JWT_SECRET that is never defined — latent NameError.",
+    "utils/auth.py: get_current_user uses non-existent sb.auth.admin.get_user — Supabase token verification path is effectively dead code.",
+    "server.py /auth/register: catching the entire Supabase exception block silently masks 'User not allowed' — log.warning is good, but the migration is failing in prod-equivalent without anyone noticing.",
+    "server.py /auth/forgot-password: returning generic 200 message is correct for security, but the inner try/except should at least DETECT 'User not in Supabase Auth' and trigger a different recovery path (e.g., custom email with token) so legitimate users aren't silently blocked."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_supabase_auth_migration.py (new, 13 pytest tests covering full Supabase-auth migration regression suite)"
+  ],
+  "success_rate": {"backend": "100% (13/13 pytest)", "frontend": "85% (forgot-password + login + admin + dashboard PASS; annual-plan content empty)"},
+  "test_credentials": {
+    "customer": "test@billseasypay.com / Test123! (works via custom-JWT fallback, NOT Supabase)",
+    "admin": "admin@billseasypay.com / Admin123! (works via custom-JWT fallback, NOT Supabase)"
+  },
+  "seed_data_creation": "Each pytest run creates a unique TEST_supabase_<hex>@example.com user via /api/auth/register; users persist in Supabase Postgres users table (and one accidentally landed in Supabase Auth from prior debugging — not cleaned).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend test file is /app/backend/tests/test_supabase_auth_migration.py (run with REACT_APP_BACKEND_URL env var). All 13 tests are GREEN end-to-end. Forgot-password page testids in place: forgot-password-link / forgot-email-input / forgot-submit-btn / reset-sent-message — all wired and working. KEY GOTCHA: Supabase Auth is configured but every real path silently falls back to custom JWT — see action_items. Validate /dashboard/annual-plan regression: iter14 showed full forecast for test@billseasypay.com, iter15 shows empty body. Backend /api/v2/predict-bills still 200, so this is a UI render bug.",
+  "rca of the issue": {
+    "supabase_no_op": "Supabase create/sign_in/get_user calls all fail (User not allowed / Invalid credentials / AttributeError) because (a) project Auth settings likely disallow service-role signups OR users were never backfilled, and (b) SDK version's auth-admin does not expose get_user. Code defensively catches everything and falls back to legacy JWT+bcrypt path -> end-user UX appears normal but Supabase Auth is not active.",
+    "annual_plan_empty": "Likely frontend regression — could not pinpoint without console errors visible during this run. Recommend checking ForecastDashboard.jsx for tier-gate condition changes or data-shape mismatch from /api/v2/predict-bills."
+  }
+}
