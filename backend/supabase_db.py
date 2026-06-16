@@ -12,18 +12,17 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-
 _client: Client = None
 
 
 def get_supabase() -> Client:
     global _client
     if _client is None:
-        if not SUPABASE_URL or not SUPABASE_KEY:
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if not url or not key:
             raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set")
-        _client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        _client = create_client(url, key)
         logger.info("Supabase client initialized")
     return _client
 
@@ -129,7 +128,10 @@ async def update_many(table: str, filters: dict, updates: dict) -> int:
 
     query = sb.table(table).update(set_data)
     for k, v in filters.items():
-        query = query.eq(k, v)
+        if isinstance(v, dict) and "$in" in v:
+            query = query.in_(k, v["$in"])
+        else:
+            query = query.eq(k, v)
     result = query.execute()
     return len(result.data) if result.data else 0
 

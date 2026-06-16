@@ -38,9 +38,6 @@ import supabase_db as sdb
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# Supabase connection (replaces MongoDB)
-sdb.get_supabase()
-
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -1392,7 +1389,7 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
                 bills_fetched.append(bill)
         
         # Update last sync time
-        await sdb.update_one("provider_connections",(
+        await sdb.update_one("provider_connections",
             {"id": connection_id},
             {"$set": {"last_sync": datetime.now(timezone.utc).isoformat()}}
         )
@@ -1579,8 +1576,8 @@ async def process_bulk_payment(
     Mark bills as paid in bulk (after admin processes payment to provider)
     """
     now = datetime.now(timezone.utc).isoformat()
-    result = await sdb.update_many("bills",(
-        {"id": {"$in": bill_ids}, "provider": provider, "status": "pending"},
+    result = await sdb.update_many("bills",
+        {"id": {"$in": bill_ids}, "status": "pending"},
         {"$set": {"status": "paid", "paid_by": "admin", "paid_at": now}}
     )
     
@@ -2136,7 +2133,7 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
             # Credit wallet - only once
             amount = tx["amount"]
             await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-            await sdb.update_one("payment_transactions",(
+            await sdb.update_one("payment_transactions",
                 {"session_id": session_id},
                 {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
             )
@@ -2187,7 +2184,7 @@ async def stripe_webhook(request: Request):
             if tx and tx.get("payment_status") != "paid":
                 amount = tx["amount"]
                 await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-                await sdb.update_one("payment_transactions",(
+                await sdb.update_one("payment_transactions",
                     {"session_id": event.session_id},
                     {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
                 )
@@ -2225,13 +2222,15 @@ async def process_auto_deductions():
 
                     # Deduct from wallet (simulate scheduled collection)
                     await sdb.update_one("users", {"id": uid}, {"$inc": {"wallet_balance": amount}})
-                    await sdb.update_one("payment_plans",(
-                        {"user_id": uid, "status": "active"},
-                        {
-                            "$inc": {"total_collected": amount},
-                            "$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}
-                        }
-                    )
+                    plan_update = await sdb.find_one("payment_plans", {"user_id": uid, "status": "active"})
+                    if plan_update:
+                        await sdb.update_one("payment_plans",
+                            {"user_id": uid, "status": "active"},
+                            {"$set": {
+                                "total_collected": (plan_update.get("total_collected", 0) or 0) + amount,
+                                "next_deduction_date": _next_deduction_date(freq).isoformat()
+                            }}
+                        )
                     # Record transaction
                     tx = Transaction(
                         user_id=uid,
@@ -2297,13 +2296,15 @@ async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
             amount = plan["deduction_amount"]
             freq = plan["frequency"]
             await sdb.update_one("users", {"id": current_user["id"]}, {"$inc": {"wallet_balance": amount}})
-            await sdb.update_one("payment_plans",(
-                {"user_id": current_user["id"], "status": "active"},
-                {
-                    "$inc": {"total_collected": amount},
-                    "$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}
-                }
-            )
+            cur_plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"], "status": "active"})
+            if cur_plan:
+                await sdb.update_one("payment_plans",
+                    {"user_id": current_user["id"], "status": "active"},
+                    {"$set": {
+                        "total_collected": (cur_plan.get("total_collected", 0) or 0) + amount,
+                        "next_deduction_date": _next_deduction_date(freq).isoformat()
+                    }}
+                )
             tx = Transaction(
                 user_id=current_user["id"], type="auto_deduction", amount=amount,
                 description=f"Manual trigger: {freq} deduction (${amount:.2f})"
@@ -3099,7 +3100,70 @@ logger = logging.getLogger(__name__)
 
 @app.on_event("startup")
 async def startup_event():
-    """Start background schedulers."""
+    """Seed admin/test user and start background schedulers."""
+    # Seed admin user if not exists
+    admin = await sdb.find_one("users", {"email": "admin@billseasypay.com"})
+    if not admin:
+        admin_dict = {
+            "id": str(uuid.uuid4()),
+            "full_name": "Admin User",
+            "email": "admin@billseasypay.com",
+            "password": hash_password("Admin123!"),
+            "phone": "",
+            "wallet_balance": 0,
+            "is_admin": True,
+            "role": "admin",
+            "stripe_customer_id": "",
+            "subscription_fee": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await sdb.insert_one("users", admin_dict)
+        logger.info("Admin user seeded: admin@billseasypay.com")
+
+    # Seed test customer if not exists
+    test_user = await sdb.find_one("users", {"email": "test@billseasypay.com"})
+    if not test_user:
+        test_dict = {
+            "id": str(uuid.uuid4()),
+            "full_name": "Test User",
+            "email": "test@billseasypay.com",
+            "password": hash_password("Test123!"),
+            "phone": "",
+            "wallet_balance": 500.0,
+            "is_admin": False,
+            "role": "customer",
+            "stripe_customer_id": "",
+            "subscription_fee": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await sdb.insert_one("users", test_dict)
+        logger.info("Test user seeded: test@billseasypay.com")
+
+        # Seed sample bills for test user
+        sample_bills = [
+            {"category": "Electricity", "provider": "AGL Energy", "amount": 280.50, "frequency": "quarterly"},
+            {"category": "Electricity", "provider": "AGL Energy", "amount": 281.95, "frequency": "quarterly"},
+            {"category": "Gas", "provider": "Origin Energy", "amount": 145.00, "frequency": "quarterly"},
+            {"category": "Gas", "provider": "Origin Gas", "amount": 89.50, "frequency": "monthly"},
+            {"category": "Water", "provider": "Sydney Water", "amount": 84.50, "frequency": "quarterly"},
+            {"category": "Internet", "provider": "Aussie Broadband", "amount": 87.00, "frequency": "monthly"},
+        ]
+        for sb_data in sample_bills:
+            bill = {
+                "id": str(uuid.uuid4()),
+                "user_id": test_dict["id"],
+                "category": sb_data["category"],
+                "provider": sb_data["provider"],
+                "account_number": "",
+                "amount": sb_data["amount"],
+                "due_date": (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d"),
+                "frequency": sb_data["frequency"],
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await sdb.insert_one("bills", bill)
+        logger.info(f"Seeded {len(sample_bills)} sample bills for test user")
+
     asyncio.create_task(process_auto_deductions())
     asyncio.create_task(generate_notifications())
     logger.info("Auto-deduction scheduler and notification generator started")
