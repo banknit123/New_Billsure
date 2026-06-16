@@ -1,4 +1,6 @@
-"""EasyBillsPay — Utility functions: auth, encryption, email"""
+"""EasyBillsPay — Utility functions: auth, encryption, email
+Now using Supabase Auth for authentication with custom JWT fallback.
+"""
 import os
 import logging
 import asyncio
@@ -9,6 +11,7 @@ import jwt
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import supabase_db as sdb
+from supabase import create_client
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +21,19 @@ security = HTTPBearer()
 SECRET_KEY = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = int(os.environ.get('TOKEN_EXPIRE_HOURS', '4'))
+
+# Supabase Auth
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET', '')
+
+_supabase_admin = None
+
+def get_supabase_admin():
+    global _supabase_admin
+    if _supabase_admin is None and SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    return _supabase_admin
 
 # Encryption
 _enc_key = os.environ.get('ENCRYPTION_KEY', '')
@@ -37,29 +53,81 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def decode_token(token: str):
+    """Decode either a custom JWT or a Supabase JWT token."""
+    # Try custom JWT first
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+        pass
+
+    # Try Supabase JWT (signed with Supabase JWT secret)
+    if SUPABASE_JWT_SECRET:
+        try:
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+            return payload
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
+            pass
+
+    # Try Supabase JWT without audience verification (fallback)
+    if SUPABASE_JWT_SECRET:
+        try:
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+            return payload
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Token has expired or is invalid")
+
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-    payload = decode_token(token)
-    user_id = payload.get("user_id")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    user = await sdb.find_one("users", {"id": user_id})
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+
+    # Try custom JWT first (backwards compatibility)
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if user_id:
+            user = await sdb.find_one("users", {"id": user_id})
+            if user:
+                return user
+    except Exception:
+        pass
+
+    # Try Supabase token verification via admin API
+    sb = get_supabase_admin()
+    if sb:
+        try:
+            auth_response = sb.auth.admin.get_user(token)
+            if auth_response and auth_response.user:
+                sb_user = auth_response.user
+                # Find by supabase_uid or email
+                user = await sdb.find_one("users", {"supabase_uid": sb_user.id})
+                if not user and sb_user.email:
+                    user = await sdb.find_one("users", {"email": sb_user.email})
+                if user:
+                    return user
+        except Exception as e:
+            logger.debug(f"Supabase token verification failed: {e}")
+
+    raise HTTPException(status_code=401, detail="Invalid or expired token")
+
 
 async def get_admin_user(current_user: dict = Depends(get_current_user)):
     if not current_user.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
+
 
 def encrypt_field(value: str) -> str:
     if not _fernet or not value:
