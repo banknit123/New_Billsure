@@ -54,9 +54,7 @@ Build www.easybillspay.com.au - a utility bill management and payment portal whe
     - DEPLOYMENT.md with branch strategy and upgrade checklist
 
 ## Pending / Backlog
-- P1: Refactor server.py (~3100 lines) into routes/, models/, utils/ modules
-- P1: Collect Resend API Key from user for live email delivery
-- P1: Collect Accurassi API Key from user for live bill sync
-- P2: Enforce tier-gating on v2 endpoints (Basic users restricted from forecast/AI)
-- P2: Real Accurassi integration once key is provided
-- P2: Optimise ForecastDashboard to only re-fetch simulate-plan on frequency change
+- P2: Further refactor server.py routes into separate route files (routes/auth.py, routes/bills.py, etc.)
+- P2: Supabase Auth migration (replace custom JWT with Supabase built-in auth)
+- P2: Add GET /api/health endpoint for monitoring
+- P3: Cache subscription tier per-request to reduce DB calls
