@@ -12,12 +12,10 @@ import logging
 import asyncio
 import csv
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict
+from pydantic import BaseModel
 import uuid
 from datetime import datetime, timezone, timedelta
-import jwt
-from passlib.context import CryptContext
 import requests
 import base64
 import re
@@ -35,36 +33,24 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import supabase_db as sdb
 
+# Models
+from models.schemas import (
+    UserRegister, UserLogin, User, Bill, BillCreate, BankDetails, BankDetailsCreate,
+    PaymentStructure, PaymentStructureCreate, BillUpload, ParsedBillData,
+    DirectDebitRequest, DirectDebitRequestCreate, ProviderConnection, ProviderConnectionCreate,
+    Transaction, MockPayment, PaymentMethod, PaymentMethodCreate, AdminPayBillRequest,
+)
+
+# Utils
+from utils.auth import (
+    hash_password, verify_password, create_access_token, decode_token,
+    get_current_user, get_admin_user, encrypt_field, decrypt_field,
+    send_email, RESEND_API_KEY, SENDER_EMAIL,
+    security, pwd_context, SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_HOURS,
+)
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
-# Security
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
-SECRET_KEY = os.environ.get('JWT_SECRET', 'your-secret-key-change-in-production')
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = int(os.environ.get('TOKEN_EXPIRE_HOURS', '4'))
-
-# Field-level encryption for PCI DSS compliance
-_enc_key = os.environ.get('ENCRYPTION_KEY', '')
-_fernet = Fernet(_enc_key.encode()) if _enc_key else None
-
-
-def encrypt_field(value: str) -> str:
-    """Encrypt a sensitive field value. Returns original if encryption not configured."""
-    if not _fernet or not value:
-        return value
-    return _fernet.encrypt(value.encode()).decode()
-
-
-def decrypt_field(value: str) -> str:
-    """Decrypt a sensitive field value. Returns original if decryption fails."""
-    if not _fernet or not value:
-        return value
-    try:
-        return _fernet.decrypt(value.encode()).decode()
-    except Exception:
-        return value  # Already plaintext (pre-migration data)
 
 # Create the main app
 app = FastAPI()
@@ -98,234 +84,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Helper functions
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def create_access_token(data: dict, expires_delta: timedelta = None):
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=TOKEN_EXPIRE_HOURS))
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
-
-def decode_token(token: str):
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    payload = decode_token(token)
-    user_id = payload.get("user_id")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-    user = await sdb.find_one("users", {"id": user_id})
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-# Models
-class UserRegister(BaseModel):
-    email: EmailStr
-    password: str
-    full_name: str
-    phone: Optional[str] = None
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str
-
-class User(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    email: EmailStr
-    full_name: str
-    phone: Optional[str] = None
-    wallet_balance: float = 0.0
-    subscription_fee: float = 0.0
-    is_admin: bool = False
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class Bill(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    category: str  # Electricity, Water, Council, Mobile, Internet, School Fees, Tuition Fees
-    provider: str
-    account_number: str
-    biller_code: Optional[str] = None  # BPAY Biller Code
-    reference_number: Optional[str] = None  # BPAY/Payment Reference Number
-    bpay_code: Optional[str] = None  # Legacy alias for biller_code
-    amount: float
-    due_date: str  # ISO date string
-    frequency: str  # monthly, quarterly, yearly
-    status: str = "pending"  # pending, paid, overdue
-    paid_by: Optional[str] = None  # "auto" | "admin" | "customer"
-    paid_at: Optional[str] = None
-    payment_reference: Optional[str] = None  # Admin-entered bank transfer reference
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class BillCreate(BaseModel):
-    category: str
-    provider: str
-    account_number: str
-    biller_code: Optional[str] = None
-    reference_number: Optional[str] = None
-    bpay_code: Optional[str] = None
-    amount: float
-    due_date: str
-    frequency: str = "monthly"
-
-class BankDetails(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    account_holder_name: str
-    bank_name: str
-    account_number: str  # Encrypted in production
-    routing_number: str
-    account_type: str  # checking, savings
-    is_primary: bool = True
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class BankDetailsCreate(BaseModel):
-    account_holder_name: str
-    bank_name: str
-    account_number: str
-    routing_number: str
-    account_type: str = "checking"
-
-class PaymentStructure(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    payment_frequency: str  # weekly, fortnightly, monthly
-    total_yearly_bills: float
-    total_monthly_bills: float
-    contribution_amount: float
-    next_deduction_date: str
-    auto_deduct_enabled: bool = True
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class PaymentStructureCreate(BaseModel):
-    payment_frequency: str
-    auto_deduct_enabled: bool = True
-
-class BillUpload(BaseModel):
-    file_data: str  # Base64 encoded file
-    file_name: str
-    file_type: str  # image/jpeg, image/png, application/pdf
-
-class ParsedBillData(BaseModel):
-    category: Optional[str] = None
-    provider: Optional[str] = None
-    account_number: Optional[str] = None
-    amount: Optional[float] = None
-    due_date: Optional[str] = None
-    extracted_text: str
-
-class DirectDebitRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    mandate_reference: str  # Unique DDR reference
-    bank_name: str
-    bsb: str  # Australian Bank State Branch code
-    account_number: str
-    account_holder_name: str
-    account_type: str  # savings, cheque
-    provider: str  # Utility provider name
-    provider_type: str  # Electricity, Water, Gas, etc.
-    provider_account_number: str
-    payment_frequency: str  # weekly, fortnightly, monthly
-    max_payment_amount: float
-    start_date: str
-    status: str = "active"  # active, cancelled, suspended
-    authorization_date: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    signature: str  # Digital signature (user's name as consent)
-    terms_accepted: bool = True
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class DirectDebitRequestCreate(BaseModel):
-    bank_name: str
-    bsb: str
-    account_number: str
-    account_holder_name: str
-    account_type: str
-    provider: str
-    provider_type: str
-    provider_account_number: str
-    payment_frequency: str
-    max_payment_amount: float
-    start_date: str
-    signature: str
-
-class ProviderConnection(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    provider_name: str
-    provider_type: str  # Electricity, Water, Gas, Internet, Mobile
-    api_endpoint: Optional[str] = None
-    account_number: str
-    customer_id: Optional[str] = None
-    api_key: Optional[str] = None  # User's provider API key
-    status: str = "connected"  # connected, disconnected, error
-    last_sync: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class ProviderConnectionCreate(BaseModel):
-    provider_name: str
-    provider_type: str
-    account_number: str
-    customer_id: Optional[str] = None
-    api_key: Optional[str] = None
-
-class Transaction(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    type: str  # deposit, bill_payment, subscription_fee
-    amount: float
-    description: str
-    status: str = "completed"  # completed, pending, failed
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class MockPayment(BaseModel):
-    amount: float
-    payment_method: str = "card"
-
-class PaymentMethod(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    user_id: str
-    type: str  # bank_account, credit_card, debit_card
-    label: str  # "Commonwealth Bank Savings", "Visa ending 4242"
-    bank_name: Optional[str] = None
-    bsb: Optional[str] = None
-    account_number_masked: Optional[str] = None
-    card_last4: Optional[str] = None
-    card_brand: Optional[str] = None
-    is_primary: bool = False
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class PaymentMethodCreate(BaseModel):
-    type: str
-    label: str
-    bank_name: Optional[str] = None
-    bsb: Optional[str] = None
-    account_number: Optional[str] = None
-    card_number: Optional[str] = None
-    card_brand: Optional[str] = None
-    is_primary: bool = False
 
 # Routes
 @api_router.get("/")
@@ -699,39 +457,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         "recent_transactions": transactions[:5]
     }
 
-# Accurassi API Integration
-ACCURASSI_CLIENT_CODE = os.environ.get('ACCURASSI_CLIENT_CODE', '')
-ACCURASSI_CLIENT_ID = os.environ.get('ACCURASSI_CLIENT_ID', '')
-ACCURASSI_BASE_URL = "https://api.accurassi.com/v4"
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-RESEND_API_KEY = os.environ.get('RESEND_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@easybillspay.com.au')
-
-# Initialize Resend if key is available
-if RESEND_API_KEY:
-    import resend
-    resend.api_key = RESEND_API_KEY
-
-
-async def send_email(to_email: str, subject: str, html_body: str):
-    """Send an email via Resend. Falls back to logging if not configured."""
-    if not RESEND_API_KEY:
-        logger.info(f"[EMAIL SIM] To: {to_email} | Subject: {subject}")
-        return False
-
-    try:
-        params = {
-            "from": SENDER_EMAIL,
-            "to": [to_email],
-            "subject": subject,
-            "html": html_body
-        }
-        await asyncio.to_thread(resend.Emails.send, params)
-        logger.info(f"[EMAIL SENT] To: {to_email} | Subject: {subject}")
-        return True
-    except Exception as e:
-        logger.error(f"[EMAIL FAIL] To: {to_email} | Error: {e}")
-        return False
 
 
 def build_bill_email(notification_type: str, user_name: str, bill_provider: str, bill_amount: float, due_date: str, message: str) -> str:
@@ -1061,39 +787,6 @@ async def extract_bill_data(
     try:
         # ===== PATH 1: PDF FILES =====
         if is_pdf:
-            # Try Accurassi API first if credentials exist
-            if ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID:
-                try:
-                    b64_content = base64.b64encode(file_content).decode('utf-8')
-                    async with httpx.AsyncClient(timeout=30) as http_client:
-                        resp = await http_client.post(
-                            f"{ACCURASSI_BASE_URL}/extraction",
-                            headers={
-                                "clientCode": ACCURASSI_CLIENT_CODE,
-                                "clientID": ACCURASSI_CLIENT_ID,
-                                "Content-Type": "application/json"
-                            },
-                            json={"ebillBase64": b64_content}
-                        )
-                        if resp.status_code == 200:
-                            accurassi_data = resp.json()
-                            parsed = {
-                                "category": "Electricity",
-                                "provider": accurassi_data.get("retailer", ""),
-                                "account_number": accurassi_data.get("accountNumber", ""),
-                                "biller_code": accurassi_data.get("bpayCode", ""),
-                                "reference_number": accurassi_data.get("bpayReference", ""),
-                                "amount": accurassi_data.get("totalDue", accurassi_data.get("estimatedAnnualCost", 0)),
-                                "due_date": accurassi_data.get("dueDate", ""),
-                                "frequency": "quarterly",
-                                "bpay_code": accurassi_data.get("bpayCode", ""),
-                                "extracted_text": f"Accurassi extraction",
-                                "extraction_method": "accurassi"
-                            }
-                            return parsed
-                except Exception as e:
-                    logger.warning(f"Accurassi API failed, falling back: {e}")
-
             # Try pdfplumber text extraction
             try:
                 with pdfplumber.open(io.BytesIO(file_content)) as pdf:
@@ -1195,21 +888,6 @@ async def extract_bill_data(
         logger.error(f"Bill extraction error: {e}")
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
-
-@api_router.get("/accurassi/status")
-async def get_accurassi_status(current_user: dict = Depends(get_current_user)):
-    """Check extraction integration status"""
-    has_accurassi = bool(ACCURASSI_CLIENT_CODE and ACCURASSI_CLIENT_ID)
-    has_vision = bool(EMERGENT_LLM_KEY)
-    return {
-        "configured": has_accurassi,
-        "ocr_available": has_vision,
-        "message": (
-            "Accurassi API connected" if has_accurassi
-            else "AI Vision enabled for images + PDF text extraction" if has_vision
-            else "PDF text extraction only"
-        )
-    }
 
 # Direct Debit Request (DDR) Routes
 @api_router.post("/direct-debit/create")
@@ -1584,11 +1262,6 @@ async def process_bulk_payment(
         "message": f"Bulk payment processed for {provider}",
         "bills_updated": result
     }
-
-
-class AdminPayBillRequest(BaseModel):
-    bill_id: str
-    payment_reference: Optional[str] = None
 
 
 @api_router.post("/admin/pay-bill")
@@ -2863,7 +2536,7 @@ _INSIGHTS_TTL = 900  # 15 minutes
 
 @api_router.get("/insights/analyze")
 async def get_bill_insights(user=Depends(get_current_user)):
-    """AI-powered bill intelligence - spending analysis, trends, and savings suggestions."""
+    """AI-powered bill intelligence. Analytics for all, AI insights for Standard+."""
     bills = await sdb.find_many("bills", {"user_id": user["id"]})
 
     if not bills:
@@ -2978,9 +2651,27 @@ from billing_engine import (
 )
 
 
+async def _get_user_tier(user_id: str) -> dict:
+    """Get user's subscription tier with feature flags."""
+    sub = await sdb.find_one("subscriptions", {"user_id": user_id})
+    tier_id = sub.get("tier", "basic") if sub else "basic"
+    return SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
+
+
+def _require_feature(tier: dict, feature: str):
+    """Raise 403 if the user's tier doesn't include the feature."""
+    if not tier.get(feature):
+        raise HTTPException(
+            status_code=403,
+            detail=f"This feature requires a Standard or Premium plan. Please upgrade at /dashboard/subscription."
+        )
+
+
 @api_router.get("/v2/predict-bills")
 async def v2_predict_bills(current_user: dict = Depends(get_current_user)):
-    """12-month bill forecast with seasonal weighting."""
+    """12-month bill forecast with seasonal weighting. Requires Standard+."""
+    tier = await _get_user_tier(current_user["id"])
+    _require_feature(tier, "has_forecasting")
     bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     if not bills:
         return {"prediction": None, "message": "No bills to predict."}
@@ -2996,23 +2687,23 @@ async def v2_simulate_plan(
     if frequency not in ("weekly", "fortnightly", "monthly"):
         raise HTTPException(status_code=400, detail="Invalid frequency")
 
+    tier = await _get_user_tier(current_user["id"])
+    _require_feature(tier, "has_forecasting")
+
     bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
     if not bills:
         return {"simulation": None, "message": "No pending bills."}
 
-    # Determine buffer based on user subscription tier
-    user_sub = await sdb.find_one("subscriptions", {"user_id": current_user["id"]})
-    tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
-    tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
     buffer_pct = tier["buffer_pct"]
-
     simulation = calculate_smoothed_payment(bills, frequency, buffer_pct)
     return {"simulation": simulation}
 
 
 @api_router.get("/v2/plan-health")
 async def v2_plan_health(current_user: dict = Depends(get_current_user)):
-    """Excess/deficit balancing — is the plan on track?"""
+    """Excess/deficit balancing — is the plan on track? Requires Standard+."""
+    tier = await _get_user_tier(current_user["id"])
+    _require_feature(tier, "has_forecasting")
     plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"]})
     if not plan or plan.get("status") != "active":
         return {"health": None, "message": "No active plan."}
@@ -3027,14 +2718,13 @@ async def v2_plan_health(current_user: dict = Depends(get_current_user)):
 
 @api_router.get("/v2/savings-comparison")
 async def v2_savings_comparison(current_user: dict = Depends(get_current_user)):
-    """Compare smoothed vs traditional billing."""
+    """Compare smoothed vs traditional billing. Requires Standard+."""
+    tier = await _get_user_tier(current_user["id"])
+    _require_feature(tier, "has_forecasting")
+
     bills = await sdb.find_many("bills", {"user_id": current_user["id"]})
     if not bills:
         return {"comparison": None, "message": "No bills to compare."}
-
-    user_sub = await sdb.find_one("subscriptions", {"user_id": current_user["id"]})
-    tier_id = user_sub.get("tier", "basic") if user_sub else "basic"
-    tier = SUBSCRIPTION_TIERS.get(tier_id, SUBSCRIPTION_TIERS["basic"])
 
     comparison = calculate_savings_comparison(bills, tier["buffer_pct"])
     return {"comparison": comparison}

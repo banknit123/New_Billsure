@@ -20,10 +20,12 @@ const ForecastDashboard = ({ user }) => {
   const [comparison, setComparison] = useState(null);
   const [loading, setLoading] = useState(true);
   const [frequency, setFrequency] = useState('monthly');
+  const [upgradeNeeded, setUpgradeNeeded] = useState(false);
   const navigate = useNavigate();
 
   const fetchAll = async () => {
     setLoading(true);
+    setUpgradeNeeded(false);
     try {
       const [predRes, simRes, healthRes, compRes] = await Promise.all([
         axiosInstance.get(`${API}/v2/predict-bills`),
@@ -35,7 +37,11 @@ const ForecastDashboard = ({ user }) => {
       setSimulation(simRes.data.simulation);
       setHealth(healthRes.data.health);
       setComparison(compRes.data.comparison);
-    } catch {} finally { setLoading(false); }
+    } catch (err) {
+      if (err.response?.status === 403) {
+        setUpgradeNeeded(true);
+      }
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { fetchAll(); }, [frequency]);
@@ -47,6 +53,21 @@ const ForecastDashboard = ({ user }) => {
           <div key={i} className="h-48 bg-white rounded-xl border border-slate-200 animate-pulse" />
         ))}
       </div>
+    );
+  }
+
+  if (upgradeNeeded) {
+    return (
+      <Card className="border-blue-200 bg-blue-50" data-testid="forecast-upgrade">
+        <CardContent className="p-12 text-center">
+          <Target className="mx-auto mb-4 text-blue-400" size={48} />
+          <h3 className="text-lg font-semibold text-slate-900 mb-2" style={{ fontFamily: 'Outfit, sans-serif' }}>Upgrade to Unlock Forecasting</h3>
+          <p className="text-sm text-slate-500 max-w-sm mx-auto mb-4">12-month bill forecasting, payment smoothing, and savings analysis are available on Standard and Premium plans.</p>
+          <Button onClick={() => navigate('/dashboard/subscription')} className="bg-blue-600 hover:bg-blue-700 text-sm">
+            View Plans <ArrowRight size={14} className="ml-1.5" />
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 

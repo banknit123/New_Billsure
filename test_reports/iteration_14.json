@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 14: Validated EasyBillsPay refactor (models/schemas.py, utils/auth.py) + v2 tier-gating + Resend live. Backend pytest: 14/14 PASS (incl. /api/auth/register now FIXED — was the critical 500 from iter13). Tier-gating verified: Basic user receives 403 with upgrade message on all 4 v2 endpoints (predict-bills, simulate-plan, plan-health, savings-comparison); Standard user gets 200 with full data; unauthenticated returns 401/403. Frontend E2E (Playwright): Standard customer login → /dashboard with bills+wallet $500+AI insight; Annual Plan renders full forecast ($5657.89/yr, $509.21/mo smoothed, Peak Jul 2026, $91.04 variance, chart, savings 93→100%, category breakdown) ✓; Bill Intelligence loads ✓; Subscription page shows 3 tiers (Basic Free / Standard $9.90 'Current Plan' / Premium $19.90) with Select buttons ✓; Basic user lands on /dashboard and Annual Plan correctly displays blue 'Upgrade to Unlock Forecasting' card with data-testid='forecast-upgrade' (4 console 403s confirm tier-gating fires) ✓; Admin login NOW auto-redirects to /admin (fixed from iter13) and Financial Overview renders real data (6 users, 7 pending bills, $1010.95 outstanding, Outstanding-by-Period chart, Money Flow donut) ✓.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/health", "issue": "Still no health endpoint (carry-over from iter13, low priority)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/dashboard/subscription", "issues": ["Initial render shows 3 empty skeleton placeholders for ~5-7s while /api/v2/subscription/tiers loads — no spinner/loading text. Cards populate correctly afterwards. Consider adding a 'Loading plans…' indicator or shimmer inside skeletons for better UX."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_tier_gating.py",
+    "/app/test_reports/pytest/iter14_tier_gating.xml"
+  ],
+  "action_items": [
+    "Optional UX: add loading indicator on Subscription page skeletons (currently looks like a broken page on slow networks).",
+    "Optional: add GET /api/health endpoint for monitoring (carry-over)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is still 2859 lines — exceeds the 700-line threshold. Refactor extracted models + utils helped, but route handlers should be split into routers/ (e.g., routes/auth.py, routes/bills.py, routes/v2.py).",
+    "_get_user_tier() falls back to SUBSCRIPTION_TIERS['basic'] silently — fine, but log a warning when an unknown tier_id is encountered for observability.",
+    "utils/auth.py: passlib bcrypt warning persists (bcrypt>=4 incompatibility). Pin bcrypt<4 in requirements.txt or upgrade passlib.",
+    "utils/auth.py: `jwt.JWTError` may not exist on PyJWT >=2 (it's `jwt.PyJWTError`); double-check exception class to avoid masking unexpected errors.",
+    "RESEND import is at module load (line 82) gated by RESEND_API_KEY — okay, but `resend` is a hard dependency at runtime when key is set; add it to requirements.txt explicitly and document.",
+    "Subscription tier check could be cached per-request (currently does a sdb.find_one on every v2 call) — minor perf optimization."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_tier_gating.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14 pytest)", "frontend": "100% (all 7 review scenarios pass)"},
+  "test_credentials": {
+    "standard_customer": "test@billseasypay.com / Test123! (WORKS, Standard tier)",
+    "basic_customer": "basicuser@test.com / Test123! (WORKS, Basic tier — gets 403 on v2)",
+    "admin": "admin@billseasypay.com / Admin123! (WORKS, auto-redirects to /admin)"
+  },
+  "seed_data_creation": "Created+deleted 1 TEST_Iter14_Biller bill via CRUD test (cleanup verified).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 3 review changes verified: (1) Refactor — models in /app/backend/models/schemas.py + utils in /app/backend/utils/auth.py, no Accurassi refs remain, server.py imports cleanly and all endpoints work. (2) Tier-gating — `_get_user_tier()` + `_require_feature()` at server.py:2654-2667 protect /api/v2/predict-bills, /api/v2/simulate-plan, /api/v2/plan-health, /api/v2/savings-comparison; Basic→403 with 'Standard or Premium' detail; Standard/Premium→200. Open endpoints: /api/v2/subscription/* and /api/insights/analyze. Frontend ForecastDashboard catches 403 and renders blue upgrade card (data-testid='forecast-upgrade'). (3) Resend live key configured — email send path executes (not actively verified delivery, but no errors). Also confirmed FIXED from iter13: /api/auth/register returns 200 with token+user, Admin auto-redirect to /admin, Admin Panel Financial Overview cards render real values. Test file /app/backend/tests/test_tier_gating.py covers full suite and runs in ~21s."
+}
