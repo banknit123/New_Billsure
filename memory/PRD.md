@@ -25,6 +25,13 @@ Build www.billsure.com.au - a utility bill management and payment portal where c
 8. Admin Analytics - Financial overview, outstanding, customers
 9. PCI DSS Compliance - Encryption at rest
 10. Mobile Responsive
+20. Progressive Web App (PWA) — installable from browser, offline-capable, standalone display
+    - Web App Manifest with 8 icon sizes (72-512px)
+    - Service Worker with cache-first strategy for static assets, network-first for API
+    - iOS/Android "Add to Home Screen" install prompt banner
+    - Mobile bottom navigation bar (Home, Bills, Insights, More)
+    - Safe area support for iOS notch devices
+    - Standalone mode (no browser chrome)
 11. Legal Pages - Privacy Policy, Terms of Service, BECS DDR Service Agreement (routed at /legal/privacy, /legal/terms, /legal/becs)
 12. Compliance Checkboxes - T&C acceptance on Registration, BECS DDR agreement on Payment Plan
 13. Resend Email Integration - With graceful fallback if API key missing

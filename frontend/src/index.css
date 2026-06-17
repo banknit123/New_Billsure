@@ -96,3 +96,16 @@
         border-bottom-color: inherit;
     }
 }
+
+
+/* PWA Safe area for iOS notch */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Hide scrollbar on mobile for cleaner look */
+@media (max-width: 1024px) {
+  body {
+    -webkit-overflow-scrolling: touch;
+  }
+}

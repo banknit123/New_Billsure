@@ -9,6 +9,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import LandingPage from './pages/LandingPage';
 import LegalPage from './pages/LegalPage';
 import ForgotPassword from './pages/ForgotPassword';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 
 export const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
@@ -82,6 +83,7 @@ function App() {
           <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" /> : <ForgotPassword />} />
         </Routes>
         <Toaster richColors />
+        <PWAInstallPrompt />
       </BrowserRouter>
     </AuthContext.Provider>
   );

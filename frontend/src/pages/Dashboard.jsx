@@ -118,7 +118,7 @@ export default function Dashboard() {
           </div>
         </header>
 
-        <div className="p-4 sm:p-6 lg:p-8">
+        <div className="p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8">
           <Routes>
             <Route index element={<DashboardHome user={user} refreshUser={refreshUser} />} />
             <Route path="bills" element={<BillsManager user={user} refreshUser={refreshUser} />} />
@@ -130,6 +130,28 @@ export default function Dashboard() {
             <Route path="settings" element={<SettingsPage user={user} refreshUser={refreshUser} />} />
           </Routes>
         </div>
+
+        {/* Mobile Bottom Nav */}
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex items-center justify-around h-16 z-30 lg:hidden safe-bottom" data-testid="mobile-bottom-nav">
+          {[
+            { to: '/dashboard', icon: LayoutDashboard, label: 'Home', end: true },
+            { to: '/dashboard/bills', icon: FileText, label: 'Bills' },
+            { to: '/dashboard/insights', icon: Sparkles, label: 'Insights' },
+            { to: '/dashboard/settings', icon: Settings, label: 'More' },
+          ].map(({ to, icon: Icon, label, end }) => (
+            <NavLink key={to} to={to} end={end}
+              className={({ isActive }) =>
+                `flex flex-col items-center justify-center gap-0.5 flex-1 py-2 transition-colors ${
+                  isActive ? 'text-teal' : 'text-slate-400'
+                }`
+              }
+              data-testid={`mobile-nav-${label.toLowerCase()}`}
+            >
+              <Icon size={20} strokeWidth={1.5} />
+              <span className="text-[10px] font-medium">{label}</span>
+            </NavLink>
+          ))}
+        </nav>
       </main>
     </div>
   );
