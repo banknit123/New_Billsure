@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { axiosInstance, API } from '../App';
 import { Bell, X, AlertTriangle, Clock, Wallet, CheckCircle } from 'lucide-react';
 
@@ -8,25 +8,25 @@ const NotificationBell = () => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
+  const fetchNotifs = useCallback(async () => {
+    try {
+      const res = await axiosInstance.get(`${API}/notifications`);
+      setNotifs(res.data.notifications || []);
+      setUnread(res.data.unread_count || 0);
+    } catch(err) { console.error(err.message); }
+  }, []);
+
   useEffect(() => {
     fetchNotifs();
     const interval = setInterval(fetchNotifs, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchNotifs]);
 
   useEffect(() => {
     const handleClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
-
-  const fetchNotifs = async () => {
-    try {
-      const res = await axiosInstance.get(`${API}/notifications`);
-      setNotifs(res.data.notifications || []);
-      setUnread(res.data.unread_count || 0);
-    } catch {}
-  };
 
   const markRead = async (id) => {
     await axiosInstance.put(`${API}/notifications/${id}/read`);

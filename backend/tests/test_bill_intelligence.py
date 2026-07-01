@@ -1,3 +1,4 @@
+from conftest import CUSTOMER, ADMIN, TEST_USER_PASSWORD, ADMIN_PASSWORD, API_URL
 """Tests for /api/insights/analyze endpoint (Bill Intelligence feature)."""
 import os
 import requests
@@ -5,8 +6,6 @@ import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pay-manager-stage.preview.emergentagent.com").rstrip("/")
 
-CUSTOMER = {"email": "test@billseasypay.com", "password": "Test123!"}
-ADMIN = {"email": "admin@billseasypay.com", "password": "Admin123!"}
 
 
 @pytest.fixture(scope="module")

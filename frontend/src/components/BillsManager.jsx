@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { axiosInstance, API } from '../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,14 +18,14 @@ const BillsManager = ({ user, refreshUser }) => {
   const [showWizard, setShowWizard] = useState(false);
   const [deleting, setDeleting] = useState(null);
 
-  useEffect(() => { fetchBills(); }, []);
-
-  const fetchBills = async () => {
+  const fetchBills = useCallback(async () => {
     try {
       const res = await axiosInstance.get(`${API}/bills`);
       setBills(res.data);
-    } catch {} finally { setLoading(false); }
-  };
+    } catch(err) { console.error(err.message); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchBills(); }, [fetchBills]);
 
   const deleteBill = async (id) => {
     setDeleting(id);

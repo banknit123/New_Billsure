@@ -1,3 +1,4 @@
+from conftest import TEST_USER_PASSWORD, ADMIN_PASSWORD, TEST_USER_EMAIL, ADMIN_EMAIL, API_URL
 """
 BillEasyPay API Backend Tests
 Tests all API endpoints including:
@@ -20,9 +21,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_USER_EMAIL = "test@billseasypay.com"
-TEST_USER_PASSWORD = "Test123!"
+# Loaded from conftest
 ADMIN_USER_EMAIL = "admin@billseasypay.com"
-ADMIN_USER_PASSWORD = "Admin123!"
+ADMIN_USER_PASSWORD = ADMIN_PASSWORD  # from conftest
 
 
 class TestHealthCheck:

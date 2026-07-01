@@ -1,3 +1,4 @@
+from conftest import TEST_USER_PASSWORD, ADMIN_PASSWORD, API_URL
 """
 EasyBillsPay v2 — Backend integration tests for billing smoothing engine
 & subscription pricing layer.
@@ -9,7 +10,7 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pay-manager-stage.preview.emergentagent.com").rstrip("/")
 
 CUSTOMER_EMAIL = "test@billseasypay.com"
-CUSTOMER_PASSWORD = "Test123!"
+CUSTOMER_PASSWORD = TEST_USER_PASSWORD  # from conftest
 
 
 # ---------- Auth fixture ----------

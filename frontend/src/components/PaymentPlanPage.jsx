@@ -33,20 +33,13 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
       setCalcData(calcRes.data);
       setCurrentPlan(planRes.data.status === 'none' ? null : planRes.data);
       setTransactions(txRes.data);
-    } catch {} finally { setLoading(false); }
+    } catch(err) { console.error(err.message); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // Handle Stripe redirect back
-  useEffect(() => {
-    const sessionId = searchParams.get('session_id');
-    if (sessionId) {
-      pollPaymentStatus(sessionId);
-    }
-  }, [searchParams]);
-
-  const pollPaymentStatus = async (sessionId) => {
+  const pollPaymentStatus = useCallback(async (sessionId) => {
     try {
       const res = await axiosInstance.get(`${API}/payments/status/${sessionId}`);
       if (res.data.payment_status === 'paid') {
@@ -57,11 +50,15 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
         toast.error('Payment session expired');
       } else {
         toast.info('Payment is being processed...');
-        // Poll again in 3 seconds
         setTimeout(() => pollPaymentStatus(sessionId), 3000);
       }
-    } catch {}
-  };
+    } catch(err) { console.error(err.message); }
+  }, [refreshUser, fetchData]);
+
+  useEffect(() => {
+    const sessionId = searchParams.get('session_id');
+    if (sessionId) pollPaymentStatus(sessionId);
+  }, [searchParams, pollPaymentStatus]);
 
   const selectPlan = async (freq) => {
     setSelecting(freq);

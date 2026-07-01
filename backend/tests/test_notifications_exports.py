@@ -1,3 +1,4 @@
+from conftest import TEST_USER_PASSWORD, ADMIN_PASSWORD, TEST_USER_EMAIL, ADMIN_EMAIL, API_URL
 """
 Test suite for BillsEasyPay Notifications and Export features (Iteration 4)
 - Notification CRUD endpoints
@@ -12,9 +13,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_USER_EMAIL = "test@billseasypay.com"
-TEST_USER_PASSWORD = "Test123!"
+# Loaded from conftest
 ADMIN_EMAIL = "admin@billseasypay.com"
-ADMIN_PASSWORD = "Admin123!"
+# Loaded from conftest
 
 
 class TestAuth:

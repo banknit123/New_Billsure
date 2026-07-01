@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { axiosInstance, API } from '../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ const ForecastDashboard = ({ user }) => {
   const [upgradeNeeded, setUpgradeNeeded] = useState(false);
   const navigate = useNavigate();
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     setUpgradeNeeded(false);
     try {
@@ -42,9 +42,9 @@ const ForecastDashboard = ({ user }) => {
         setUpgradeNeeded(true);
       }
     } finally { setLoading(false); }
-  };
+  }, [frequency]);
 
-  useEffect(() => { fetchAll(); }, [frequency]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
   if (loading) {
     return (

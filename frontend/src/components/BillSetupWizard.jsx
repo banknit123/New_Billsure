@@ -129,7 +129,7 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
       }
       setCalcData(flat);
       setCurrentPlan(planRes.data.status === 'none' ? null : planRes.data);
-    } catch {} finally { setPlanLoading(false); }
+    } catch(err) { console.error(err.message); } finally { setPlanLoading(false); }
   }, []);
 
   useEffect(() => { if (step === 2) fetchPlanData(); }, [step, fetchPlanData]);
@@ -152,7 +152,7 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
     try {
       const res = await axiosInstance.get(`${API}/payment-methods`);
       setMethods(res.data);
-    } catch {} finally { setMethodsLoading(false); }
+    } catch(err) { console.error(err.message); } finally { setMethodsLoading(false); }
   }, []);
 
   useEffect(() => { if (step === 3) fetchMethods(); }, [step, fetchMethods]);

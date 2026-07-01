@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { axiosInstance, API } from '../../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,13 +8,13 @@ const AdminCustomers = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
   const fetchData = async () => {
     try {
       const res = await axiosInstance.get(`${API}/admin/customer-analytics`);
       setData(res.data);
-    } catch {} finally { setLoading(false); }
+    } catch(err) { console.error(err.message); } finally { setLoading(false); }
   };
 
   const downloadExport = async () => {
@@ -26,7 +26,7 @@ const AdminCustomers = () => {
       a.download = `customer_analytics_${Date.now()}.csv`;
       a.click();
       window.URL.revokeObjectURL(url);
-    } catch {}
+    } catch(err) { console.error(err.message); }
   };
 
   if (loading) {

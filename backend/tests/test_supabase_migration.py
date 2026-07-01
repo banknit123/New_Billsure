@@ -1,3 +1,4 @@
+from conftest import CUSTOMER, ADMIN, TEST_USER_PASSWORD, ADMIN_PASSWORD, API_URL
 """
 Backend regression tests post Supabase Postgres migration.
 Validates all critical endpoints still work identically to MongoDB era.
@@ -10,8 +11,6 @@ import uuid
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pay-manager-stage.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-CUSTOMER = {"email": "test@billseasypay.com", "password": "Test123!"}
-ADMIN = {"email": "admin@billseasypay.com", "password": "Admin123!"}
 
 
 # ----- Fixtures -----

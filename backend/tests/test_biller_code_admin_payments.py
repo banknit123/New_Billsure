@@ -1,3 +1,4 @@
+from conftest import TEST_USER_PASSWORD, ADMIN_PASSWORD, TEST_USER_EMAIL, ADMIN_EMAIL, API_URL
 """
 Test Biller Code, Reference Number Extraction and Admin Payment Processing - Iteration 8
 
@@ -22,9 +23,9 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Test credentials
 TEST_USER_EMAIL = "test@billseasypay.com"
-TEST_USER_PASSWORD = "Test123!"
+# Loaded from conftest
 ADMIN_EMAIL = "admin@billseasypay.com"
-ADMIN_PASSWORD = "Admin123!"
+# Loaded from conftest
 
 
 @pytest.fixture(scope="module")

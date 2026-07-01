@@ -1,3 +1,4 @@
+from conftest import CUSTOMER, ADMIN, API_URL
 """
 Iteration 16: Backend tests for BillSetupWizard flow.
 Validates:
@@ -16,8 +17,6 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://pay-manager-stage.preview.emergentagent.com").rstrip("/")
-CUSTOMER = ("test@billseasypay.com", "Test123!")
-ADMIN = ("admin@billseasypay.com", "Admin123!")
 
 
 # ---------- fixtures ----------

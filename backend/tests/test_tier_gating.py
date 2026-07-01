@@ -1,3 +1,4 @@
+from conftest import CUSTOMER, ADMIN, TEST_USER_PASSWORD, ADMIN_PASSWORD, API_URL
 """Iteration 14: Tier-gating tests for v2 endpoints + refactor sanity + register fix."""
 import os
 import pytest
@@ -6,9 +7,6 @@ import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://pay-manager-stage.preview.emergentagent.com').rstrip('/')
 
-STANDARD_USER = {"email": "test@billseasypay.com", "password": "Test123!"}
-ADMIN_USER = {"email": "admin@billseasypay.com", "password": "Admin123!"}
-BASIC_USER = {"email": "basicuser@test.com", "password": "Test123!"}
 
 V2_GATED = ["/api/v2/predict-bills", "/api/v2/simulate-plan", "/api/v2/plan-health", "/api/v2/savings-comparison"]
 V2_OPEN = ["/api/v2/subscription/tiers", "/api/v2/subscription/current"]

@@ -22,7 +22,7 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
     try {
       const res = await axiosInstance.get(`${API}/payment-methods`);
       setMethods(res.data);
-    } catch {} finally { setLoading(false); }
+    } catch(err) { console.error(err.message); } finally { setLoading(false); }
   };
 
   const add = async (e) => {

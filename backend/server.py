@@ -2658,7 +2658,7 @@ async def get_bill_insights(user=Depends(get_current_user)):
 
     # Check cache
     import hashlib
-    cache_key = hashlib.md5(f"{user['id']}:{len(bills)}:{analytics['total_spend']}".encode()).hexdigest()
+    cache_key = hashlib.sha256(f"{user['id']}:{len(bills)}:{analytics['total_spend']}".encode()).hexdigest()
     cached = _insights_cache.get(cache_key)
     now_ts = datetime.now(timezone.utc).timestamp()
 

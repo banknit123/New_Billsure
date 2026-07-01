@@ -14,31 +14,29 @@ const DashboardHome = ({ user, refreshUser }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [billsRes, planRes] = await Promise.all([
+          axiosInstance.get(`${API}/bills`),
+          axiosInstance.get(`${API}/payment-plan/current`),
+        ]);
+        setBills(billsRes.data);
+        setPlan(planRes.data.status === 'none' ? null : planRes.data);
+      } catch(err) { console.error(err.message); } finally {
+        setLoading(false);
+      }
+    };
+    const fetchInsights = async () => {
+      try {
+        const res = await axiosInstance.get(`${API}/insights/analyze`);
+        setInsights(res.data);
+      } catch(err) { console.error(err.message); } finally {
+        setInsightsLoading(false);
+      }
+    };
     fetchData();
     fetchInsights();
   }, []);
-
-  const fetchData = async () => {
-    try {
-      const [billsRes, planRes] = await Promise.all([
-        axiosInstance.get(`${API}/bills`),
-        axiosInstance.get(`${API}/payment-plan/current`),
-      ]);
-      setBills(billsRes.data);
-      setPlan(planRes.data.status === 'none' ? null : planRes.data);
-    } catch {} finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchInsights = async () => {
-    try {
-      const res = await axiosInstance.get(`${API}/insights/analyze`);
-      setInsights(res.data);
-    } catch {} finally {
-      setInsightsLoading(false);
-    }
-  };
 
   const pending = bills.filter(b => b.status === 'pending');
   const paid = bills.filter(b => b.status === 'paid');

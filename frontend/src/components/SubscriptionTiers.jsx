@@ -44,7 +44,7 @@ const SubscriptionTiers = ({ user, refreshUser }) => {
         ]);
         setTiers(tiersRes.data.tiers);
         setCurrentTier(currentRes.data.tier);
-      } catch {} finally { setLoading(false); }
+      } catch(err) { console.error(err.message); } finally { setLoading(false); }
     };
     fetchData();
   }, []);

@@ -23,7 +23,7 @@ const AdminPayments = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const axiosInstance = axios.create({
-    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    headers: { Authorization: `Bearer ${sessionStorage.getItem('token')}` }
   });
 
   const fetchQueue = useCallback(async () => {

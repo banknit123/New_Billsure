@@ -1,3 +1,4 @@
+from conftest import CUSTOMER, ADMIN, TEST_USER_PASSWORD, ADMIN_PASSWORD, API_URL
 """Iteration 15: Supabase Auth Migration tests.
 Validates:
  - Login via Supabase Auth for existing users
@@ -15,8 +16,6 @@ import requests
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 
-CUSTOMER = {"email": "test@billseasypay.com", "password": "Test123!"}
-ADMIN = {"email": "admin@billseasypay.com", "password": "Admin123!"}
 
 
 @pytest.fixture(scope="session")

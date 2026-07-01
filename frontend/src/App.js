@@ -23,13 +23,13 @@ function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     if (token) {
       axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       axiosInstance.get(`${API}/auth/me`).then(res => {
         setUser(res.data);
       }).catch(() => {
-        localStorage.removeItem('token');
+        sessionStorage.removeItem('token');
         delete axiosInstance.defaults.headers.common['Authorization'];
       }).finally(() => setLoading(false));
     } else {
@@ -38,13 +38,13 @@ function App() {
   }, []);
 
   const login = (token, userData) => {
-    localStorage.setItem('token', token);
+    sessionStorage.setItem('token', token);
     axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     setUser(userData);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
     delete axiosInstance.defaults.headers.common['Authorization'];
     setUser(null);
   };
@@ -53,7 +53,7 @@ function App() {
     try {
       const res = await axiosInstance.get(`${API}/auth/me`);
       setUser(res.data);
-    } catch {}
+    } catch(err) { console.error(err.message); }
   };
 
   if (loading) {
