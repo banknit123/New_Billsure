@@ -16,7 +16,6 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
 from datetime import datetime, timezone, timedelta
-import requests
 import base64
 import re
 import io
@@ -1159,39 +1158,8 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
     try:
         bills_fetched = []
         
-        # Validate API endpoint against allowed domains to prevent SSRF
-        ALLOWED_API_DOMAINS = [
-            "api.agl.com.au", "api.originenergy.com.au", "api.energyaustralia.com.au",
-            "api.synergy.net.au", "api.ergon.com.au", "api.ausgrid.com.au",
-            "api.sydneywater.com.au", "api.melbournewater.com.au",
-        ]
-        if connection.get("api_endpoint") and connection.get("api_key"):
-            from urllib.parse import urlparse
-            parsed = urlparse(connection["api_endpoint"])
-            if parsed.scheme != "https" or parsed.hostname not in ALLOWED_API_DOMAINS:
-                raise HTTPException(status_code=400, detail="Provider API endpoint not in allowed list")
-            headers = {"Authorization": f"Bearer {connection['api_key']}"}
-            response = requests.get(connection["api_endpoint"], headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                # Parse provider response and create bills
-                # This is provider-specific and would need customization
-                provider_data = response.json()
-                
-                # Create bill from provider data
-                bill = Bill(
-                    user_id=current_user["id"],
-                    category=connection["provider_type"],
-                    provider=connection["provider_name"],
-                    account_number=connection["account_number"],
-                    amount=provider_data.get("amount", 0),
-                    due_date=provider_data.get("due_date", (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()),
-                    frequency="monthly",
-                    status="pending"
-                )
-                
-                await sdb.insert_one("bills", bill.model_dump())
-                bills_fetched.append(bill)
+        # Provider API sync is not yet implemented
+        # Bills are currently added via manual upload + OCR/AI extraction
         
         # Update last sync time
         await sdb.update_one("provider_connections",
@@ -1201,7 +1169,7 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
         
         return {
             "success": True,
-            "message": f"Synced {len(bills_fetched)} bills from {connection['provider_name']}",
+            "message": f"Provider connection updated for {connection['provider_name']}. Use bill upload for new bills.",
             "bills_fetched": len(bills_fetched)
         }
         

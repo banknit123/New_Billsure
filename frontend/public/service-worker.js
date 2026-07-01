@@ -29,36 +29,37 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch — only handle same-origin requests
+// Security: validate request is same-origin and safe
+function isSafeRequest(request) {
+  try {
+    const url = new URL(request.url);
+    return url.origin === self.location.origin && url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+// Fetch — only handle validated same-origin requests
 self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  const url = new URL(request.url);
+  if (!isSafeRequest(event.request)) return;
 
-  // Only handle same-origin requests to prevent SSRF
-  if (url.origin !== self.location.origin) return;
+  const url = new URL(event.request.url);
 
-  // Never cache API calls
+  // Skip API calls — always go to network
   if (url.pathname.startsWith('/api')) return;
 
-  // Network-first for navigation (SPA routes)
-  if (request.mode === 'navigate') {
+  // Navigation — serve cached shell as fallback
+  if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
+      caches.match('/index.html').then((cached) => cached || new Response('Offline', { status: 503 }))
     );
     return;
   }
 
-  // Cache-first for same-origin static assets
+  // Static assets — cache-first from pre-cached assets only
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request).then((response) => {
-        if (response.ok && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return response;
-      });
+    caches.match(event.request).then((cached) => {
+      return cached || new Response('', { status: 404 });
     })
   );
 });

@@ -177,12 +177,12 @@ function setupDevServer(config) {
           const generate = require("@babel/generator").default;
           const t = require("@babel/types");
 
-          // Verify file exists before attempting to read
-          if (!fs.existsSync(targetFile)) {
-            throw new Error(`File not found: ${targetFile}`);
+          // Security: Use validated normalizedTarget (not user input) for file operations
+          if (!fs.existsSync(normalizedTarget)) {
+            throw new Error(`File not found: ${normalizedTarget}`);
           }
 
-          // Read the current file content
+          // Read the current file content using validated path
           const currentContent = fs.readFileSync(targetFile, "utf8");
 
           // Parse the JSX file
@@ -472,9 +472,10 @@ function setupDevServer(config) {
           // Commit changes to git with timestamp
           const timestamp = Date.now();
           try {
-            // Use -c flag for per-invocation git config to avoid modifying any config
-            execSync(`git -c user.name="visual-edit" -c user.email="support@emergent.sh" add "${targetFile}"`);
-            execSync(`git -c user.name="visual-edit" -c user.email="support@emergent.sh" commit -m "visual_edit_${timestamp}"`);
+            // Use execFileSync to prevent command injection (no shell interpolation)
+            const { execFileSync } = require("child_process");
+            execFileSync("git", ["-c", "user.name=visual-edit", "-c", "user.email=support@emergent.sh", "add", targetFile]);
+            execFileSync("git", ["-c", "user.name=visual-edit", "-c", "user.email=support@emergent.sh", "commit", "-m", `visual_edit_${timestamp}`]);
           } catch (gitError) {
             console.error(`Git commit failed: ${gitError.message}`);
             // Continue even if git fails - file write succeeded

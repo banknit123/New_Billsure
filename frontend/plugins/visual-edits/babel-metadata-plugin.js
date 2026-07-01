@@ -30,6 +30,13 @@ function resolveImportPath(source, fromFile) {
     return null;
   }
 
+  // Security: ensure resolved path stays within project root
+  const normalizedBase = path.normalize(base);
+  if (!normalizedBase.startsWith(PROJECT_ROOT)) {
+    RESOLVE_CACHE.set(cacheKey, null);
+    return null;
+  }
+
   // try direct file
   for (const ext of EXTENSIONS) {
     const file = base.endsWith(ext) ? base : base + ext;
@@ -55,6 +62,9 @@ function resolveImportPath(source, fromFile) {
 
 function parseFileAst(absPath, parser) {
   try {
+    // Security: only read files within project root
+    if (!path.normalize(absPath).startsWith(PROJECT_ROOT)) return null;
+
     const stat = fs.statSync(absPath);
     const cached = FILE_AST_CACHE.get(absPath);
     if (cached && cached.mtimeMs === stat.mtimeMs) return cached.ast;
