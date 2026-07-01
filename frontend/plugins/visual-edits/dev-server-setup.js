@@ -5,13 +5,38 @@ const path = require("path");
 const express = require("express");
 const { execSync } = require("child_process");
 
+const DEV_PROJECT_ROOT = path.resolve(__dirname, '../..');
+
+// Security: safe file operations restricted to project root
+function safeRead(filePath) {
+  const normalized = path.normalize(path.resolve(filePath));
+  if (!normalized.startsWith(DEV_PROJECT_ROOT) && !normalized.startsWith("/etc/supervisor")) {
+    throw new Error("File access denied: " + normalized);
+  }
+  return fs.readFileSync(normalized, "utf8");
+}
+
+function safeWrite(filePath, content) {
+  const normalized = path.normalize(path.resolve(filePath));
+  if (!normalized.startsWith(DEV_PROJECT_ROOT)) {
+    throw new Error("Write access denied: " + normalized);
+  }
+  fs.writeFileSync(normalized, content, "utf8");
+}
+
+function safeExists(filePath) {
+  const normalized = path.normalize(path.resolve(filePath));
+  if (!normalized.startsWith(DEV_PROJECT_ROOT) && !normalized.startsWith("/etc/supervisor")) return false;
+  return fs.existsSync(normalized);
+}
+
 // 🔍 Read Supervisor code-server password from conf.d
+// Allowed config path (hardcoded, not user-controlled)
+const SUPERVISOR_CONF_PATH = "/etc/supervisor/conf.d/supervisord_code_server.conf";
+
 function getCodeServerPassword() {
   try {
-    const conf = fs.readFileSync(
-      "/etc/supervisor/conf.d/supervisord_code_server.conf",
-      "utf8",
-    );
+    const conf = safeRead(SUPERVISOR_CONF_PATH);
 
     // Match environment=PASSWORD="value"
     const match = conf.match(/PASSWORD="([^"]+)"/);
@@ -178,12 +203,12 @@ function setupDevServer(config) {
           const t = require("@babel/types");
 
           // Security: Use validated normalizedTarget (not user input) for file operations
-          if (!fs.existsSync(normalizedTarget)) {
+          if (!safeExists(normalizedTarget)) {
             throw new Error(`File not found: ${normalizedTarget}`);
           }
 
           // Read the current file content using validated path
-          const currentContent = fs.readFileSync(targetFile, "utf8");
+          const currentContent = safeRead(normalizedTarget);
 
           // Parse the JSX file
           const ast = parser.parse(currentContent, {
@@ -460,21 +485,21 @@ function setupDevServer(config) {
           });
 
           // Optional: Create backup before writing
-          const backupFile = targetFile + ".backup";
-          if (fs.existsSync(targetFile)) {
-            const originalContent = fs.readFileSync(targetFile, "utf8");
-            fs.writeFileSync(backupFile, originalContent, "utf8");
+          const backupFile = normalizedTarget + ".backup";
+          if (safeExists(normalizedTarget)) {
+            const originalContent = safeRead(normalizedTarget);
+            safeWrite(backupFile, originalContent);
           }
 
           // Write the updated content
-          fs.writeFileSync(targetFile, code, "utf8");
+          safeWrite(normalizedTarget, code);
 
           // Commit changes to git with timestamp
           const timestamp = Date.now();
           try {
             // Use execFileSync to prevent command injection (no shell interpolation)
             const { execFileSync } = require("child_process");
-            execFileSync("git", ["-c", "user.name=visual-edit", "-c", "user.email=support@emergent.sh", "add", targetFile]);
+            execFileSync("git", ["-c", "user.name=visual-edit", "-c", "user.email=support@emergent.sh", "add", normalizedTarget]);
             execFileSync("git", ["-c", "user.name=visual-edit", "-c", "user.email=support@emergent.sh", "commit", "-m", `visual_edit_${timestamp}`]);
           } catch (gitError) {
             console.error(`Git commit failed: ${gitError.message}`);
@@ -482,7 +507,7 @@ function setupDevServer(config) {
           }
 
           // Clean up backup file after successful write and commit
-          if (fs.existsSync(backupFile)) {
+          if (safeExists(backupFile)) {
             fs.unlinkSync(backupFile);
           }
         });

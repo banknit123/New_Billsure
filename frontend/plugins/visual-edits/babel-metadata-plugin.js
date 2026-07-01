@@ -13,6 +13,26 @@ const RESOLVE_CACHE = new Map(); // key: fromFile::source -> absPath | null
 const FILE_AST_CACHE = new Map(); // absPath -> { ast, mtimeMs }
 const PORTAL_COMP_CACHE = new Map(); // key: absPath::exportName -> boolean
 const DYNAMIC_COMP_CACHE = new Map(); // key: absPath::exportName -> boolean
+
+// Security: centralized file read that enforces project root containment
+function safeReadFile(filePath) {
+  const normalized = path.normalize(path.resolve(filePath));
+  if (!normalized.startsWith(PROJECT_ROOT)) {
+    throw new Error(`Path outside project root: ${normalized}`);
+  }
+  return fs.readFileSync(normalized, "utf8");
+}
+
+function safeExistsSync(filePath) {
+  const normalized = path.normalize(path.resolve(filePath));
+  return normalized.startsWith(PROJECT_ROOT) && fs.existsSync(normalized);
+}
+
+function safeStatSync(filePath) {
+  const normalized = path.normalize(path.resolve(filePath));
+  if (!normalized.startsWith(PROJECT_ROOT)) return null;
+  return fs.statSync(normalized);
+}
 const BINDING_DYNAMIC_CACHE = new WeakMap(); // node -> boolean
 
 function resolveImportPath(source, fromFile) {
@@ -40,16 +60,16 @@ function resolveImportPath(source, fromFile) {
   // try direct file
   for (const ext of EXTENSIONS) {
     const file = base.endsWith(ext) ? base : base + ext;
-    if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+    if (safeExistsSync(file) && safeStatSync(file)?.isFile()) {
       RESOLVE_CACHE.set(cacheKey, file);
       return file;
     }
   }
   // try index.* in directory
-  if (fs.existsSync(base) && fs.statSync(base).isDirectory()) {
+  if (safeExistsSync(base) && safeStatSync(base)?.isDirectory()) {
     for (const ext of EXTENSIONS) {
       const idx = path.join(base, "index" + ext);
-      if (fs.existsSync(idx)) {
+      if (safeExistsSync(idx)) {
         RESOLVE_CACHE.set(cacheKey, idx);
         return idx;
       }
@@ -65,11 +85,11 @@ function parseFileAst(absPath, parser) {
     // Security: only read files within project root
     if (!path.normalize(absPath).startsWith(PROJECT_ROOT)) return null;
 
-    const stat = fs.statSync(absPath);
+    const stat = safeStatSync(absPath);
     const cached = FILE_AST_CACHE.get(absPath);
     if (cached && cached.mtimeMs === stat.mtimeMs) return cached.ast;
 
-    const code = fs.readFileSync(absPath, "utf8");
+    const code = safeReadFile(absPath);
     const ast = parser.parse(code, {
       sourceType: "module",
       plugins: ["jsx", "typescript"],
