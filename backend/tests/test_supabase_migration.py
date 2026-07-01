@@ -71,7 +71,7 @@ class TestAuth:
         unique = f"TEST_user_{uuid.uuid4().hex[:8]}@example.com"
         payload = {
             "email": unique,
-            "password": "TestPass123!",
+            "password": TEST_USER_PASSWORD,
             "full_name": "Test Migration User",
         }
         r = s.post(f"{API}/auth/register", json=payload, timeout=30)
@@ -80,7 +80,7 @@ class TestAuth:
         data = r.json()
         assert "token" in data or "access_token" in data or "user" in data
         # Login back
-        rl = s.post(f"{API}/auth/login", json={"email": unique, "password": "TestPass123!"}, timeout=30)
+        rl = s.post(f"{API}/auth/login", json={"email": unique, "password": TEST_USER_PASSWORD}, timeout=30)
         assert rl.status_code == 200
 
 

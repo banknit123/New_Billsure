@@ -2881,9 +2881,9 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(','),
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 logging.basicConfig(
@@ -2897,15 +2897,20 @@ async def startup_event():
     """Seed admin/test user and start background schedulers."""
     sb = get_supabase_admin()
 
+    SEED_ADMIN_EMAIL = os.environ.get('SEED_ADMIN_EMAIL', 'admin@billseasypay.com')
+    SEED_ADMIN_PASSWORD = os.environ.get('SEED_ADMIN_PASSWORD', 'Admin123!')
+    SEED_TEST_EMAIL = os.environ.get('SEED_TEST_EMAIL', 'test@billseasypay.com')
+    SEED_TEST_PASSWORD = os.environ.get('SEED_TEST_PASSWORD', 'Test123!')
+
     # Seed admin user if not exists
-    admin = await sdb.find_one("users", {"email": "admin@billseasypay.com"})
+    admin = await sdb.find_one("users", {"email": SEED_ADMIN_EMAIL})
     if not admin:
         supabase_uid = None
         if sb:
             try:
                 auth_res = sb.auth.admin.create_user({
-                    "email": "admin@billseasypay.com",
-                    "password": "Admin123!",
+                    "email": SEED_ADMIN_EMAIL,
+                    "password": SEED_ADMIN_PASSWORD,
                     "email_confirm": True,
                 })
                 supabase_uid = auth_res.user.id
@@ -2914,8 +2919,8 @@ async def startup_event():
         admin_dict = {
             "id": str(uuid.uuid4()),
             "full_name": "Admin User",
-            "email": "admin@billseasypay.com",
-            "password": hash_password("Admin123!"),
+            "email": SEED_ADMIN_EMAIL,
+            "password": hash_password(SEED_ADMIN_PASSWORD),
             "phone": "",
             "wallet_balance": 0,
             "is_admin": True,
@@ -2926,17 +2931,17 @@ async def startup_event():
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await sdb.insert_one("users", admin_dict)
-        logger.info("Admin user seeded: admin@billseasypay.com")
+        logger.info(f"Admin user seeded: {SEED_ADMIN_EMAIL}")
 
     # Seed test customer if not exists
-    test_user = await sdb.find_one("users", {"email": "test@billseasypay.com"})
+    test_user = await sdb.find_one("users", {"email": SEED_TEST_EMAIL})
     if not test_user:
         supabase_uid = None
         if sb:
             try:
                 auth_res = sb.auth.admin.create_user({
-                    "email": "test@billseasypay.com",
-                    "password": "Test123!",
+                    "email": SEED_TEST_EMAIL,
+                    "password": SEED_TEST_PASSWORD,
                     "email_confirm": True,
                 })
                 supabase_uid = auth_res.user.id
@@ -2945,8 +2950,8 @@ async def startup_event():
         test_dict = {
             "id": str(uuid.uuid4()),
             "full_name": "Test User",
-            "email": "test@billseasypay.com",
-            "password": hash_password("Test123!"),
+            "email": SEED_TEST_EMAIL,
+            "password": hash_password(SEED_TEST_PASSWORD),
             "phone": "",
             "wallet_balance": 500.0,
             "is_admin": False,
@@ -2957,7 +2962,7 @@ async def startup_event():
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await sdb.insert_one("users", test_dict)
-        logger.info("Test user seeded: test@billseasypay.com")
+        logger.info(f"Test user seeded: {SEED_TEST_EMAIL}")
 
         # Seed sample bills for test user
         sample_bills = [

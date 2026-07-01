@@ -63,7 +63,7 @@ class TestAuth:
 
     def test_register_new_user(self):
         email = f"TEST_user_{uuid.uuid4().hex[:8]}@example.com"
-        payload = {"email": email, "password": "Test123!", "full_name": "Test User"}
+        payload = {"email": email, "password": TEST_USER_PASSWORD, "full_name": "Test User"}
         r = requests.post(f"{BASE_URL}/api/auth/register", json=payload, timeout=15)
         assert r.status_code in (200, 201), f"Register failed: {r.status_code} {r.text}"
         data = r.json()

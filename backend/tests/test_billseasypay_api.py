@@ -70,7 +70,7 @@ class TestAuthentication:
         """Test registration with existing email"""
         response = requests.post(f"{BASE_URL}/api/auth/register", json={
             "email": TEST_USER_EMAIL,
-            "password": "Test123!",
+            "password": TEST_USER_PASSWORD,
             "full_name": "Duplicate User"
         })
         assert response.status_code == 400
@@ -83,7 +83,7 @@ class TestAuthentication:
         unique_email = f"test_{uuid.uuid4().hex[:8]}@billseasypay.com"
         response = requests.post(f"{BASE_URL}/api/auth/register", json={
             "email": unique_email,
-            "password": "Test123!",
+            "password": TEST_USER_PASSWORD,
             "full_name": "New Test User"
         })
         assert response.status_code == 200

@@ -107,7 +107,7 @@ class TestRegister:
         unique = f"TEST_supabase_{uuid.uuid4().hex[:8]}@example.com"
         payload = {
             "email": unique,
-            "password": "TestPass123!",
+            "password": TEST_USER_PASSWORD,
             "full_name": "Supabase Test User",
             "phone": "0400000000",
         }
@@ -118,7 +118,7 @@ class TestRegister:
         assert data["user"]["email"] == unique
 
         # Login back with the same credentials
-        rl = s.post(f"{API}/auth/login", json={"email": unique, "password": "TestPass123!"}, timeout=30)
+        rl = s.post(f"{API}/auth/login", json={"email": unique, "password": TEST_USER_PASSWORD}, timeout=30)
         assert rl.status_code == 200, f"Re-login failed: {rl.text}"
 
         # Use token to call /auth/me
