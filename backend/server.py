@@ -1159,8 +1159,17 @@ async def sync_provider_bills(connection_id: str, current_user: dict = Depends(g
     try:
         bills_fetched = []
         
-        # Example: If provider has API endpoint
+        # Validate API endpoint against allowed domains to prevent SSRF
+        ALLOWED_API_DOMAINS = [
+            "api.agl.com.au", "api.originenergy.com.au", "api.energyaustralia.com.au",
+            "api.synergy.net.au", "api.ergon.com.au", "api.ausgrid.com.au",
+            "api.sydneywater.com.au", "api.melbournewater.com.au",
+        ]
         if connection.get("api_endpoint") and connection.get("api_key"):
+            from urllib.parse import urlparse
+            parsed = urlparse(connection["api_endpoint"])
+            if parsed.scheme != "https" or parsed.hostname not in ALLOWED_API_DOMAINS:
+                raise HTTPException(status_code=400, detail="Provider API endpoint not in allowed list")
             headers = {"Authorization": f"Bearer {connection['api_key']}"}
             response = requests.get(connection["api_endpoint"], headers=headers, timeout=10)
             

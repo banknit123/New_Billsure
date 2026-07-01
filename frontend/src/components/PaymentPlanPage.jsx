@@ -80,8 +80,14 @@ const PaymentPlanPage = ({ user, refreshUser }) => {
         origin_url: window.location.origin,
         payment_method_type: paymentType,
       });
-      // Redirect to Stripe
-      window.location.href = res.data.url;
+      // Validate and redirect to Stripe checkout
+      const checkoutUrl = res.data.url;
+      if (checkoutUrl && (checkoutUrl.startsWith('https://checkout.stripe.com') || checkoutUrl.startsWith('https://billing.stripe.com'))) {
+        window.location.href = checkoutUrl;
+      } else {
+        toast.error('Invalid checkout URL received');
+        setCheckingOut(null);
+      }
     } catch (err) {
       const detail = err.response?.data?.detail || '';
       if (detail.includes('BECS') && paymentType === 'au_becs_debit') {
