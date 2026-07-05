@@ -4,6 +4,12 @@ from typing import Optional
 from datetime import datetime, timezone
 import uuid
 
+# Sane upper bound for any single monetary amount accepted from a client.
+# Prevents e.g. a negative bill amount (which would silently reduce a
+# customer's smoothed payment plan or inflate a wallet balance when a
+# negative "paid" amount is subtracted) and absurdly large values.
+MAX_MONEY_AMOUNT = 100_000.0
+
 
 class UserRegister(BaseModel):
     email: EmailStr
@@ -36,7 +42,7 @@ class Bill(BaseModel):
     biller_code: Optional[str] = None
     reference_number: Optional[str] = None
     bpay_code: Optional[str] = None
-    amount: float
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
     due_date: str
     frequency: str
     status: str = "pending"
@@ -52,7 +58,7 @@ class BillCreate(BaseModel):
     biller_code: Optional[str] = None
     reference_number: Optional[str] = None
     bpay_code: Optional[str] = None
-    amount: float
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
     due_date: str
     frequency: str = "monthly"
 
@@ -118,7 +124,7 @@ class DirectDebitRequest(BaseModel):
     provider_type: str
     provider_account_number: str
     payment_frequency: str
-    max_payment_amount: float
+    max_payment_amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
     start_date: str
     status: str = "active"
     authorization_date: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -136,7 +142,7 @@ class DirectDebitRequestCreate(BaseModel):
     provider_type: str
     provider_account_number: str
     payment_frequency: str
-    max_payment_amount: float
+    max_payment_amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
     start_date: str
     signature: str
 
@@ -172,7 +178,7 @@ class Transaction(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class MockPayment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
     payment_method: str = "card"
 
 class PaymentMethod(BaseModel):

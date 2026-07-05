@@ -181,10 +181,19 @@
                     }),
                     (e.__SV = 1));
             })(document, window.posthog || []);
-            posthog.init("phc_yJW1VjHGGwmCbbrtczfqqNxgBDbhlhOWcdzcIJEOTFE", {
-                api_host: "https://us.i.posthog.com",
-                person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well
-            });
+            // COMPLIANCE FIX: this used to call posthog.init(...) unconditionally on
+            // every page load, which (a) contradicts the Privacy Policy's own claim
+            // that "we do not use third-party tracking cookies or advertising
+            // cookies", and (b) collects analytics/session data before the visitor
+            // has made any choice. PostHog now only initialises after the visitor
+            // accepts analytics cookies via the consent banner (see
+            // CookieConsentBanner.jsx), which calls window.__enablePostHogAnalytics().
+            window.__enablePostHogAnalytics = function () {
+                posthog.init("phc_yJW1VjHGGwmCbbrtczfqqNxgBDbhlhOWcdzcIJEOTFE", {
+                    api_host: "https://us.i.posthog.com",
+                    person_profiles: "identified_only", // or 'always' to create profiles for anonymous users as well
+                });
+            };
         </script>
     </body>
 </html>

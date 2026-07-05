@@ -118,7 +118,7 @@ const SubscriptionTiers = ({ user, refreshUser }) => {
                       <span className="text-3xl font-bold text-slate-900" style={{ fontFamily: 'Outfit, sans-serif' }}>
                         ${tier.monthly_fee.toFixed(2)}
                       </span>
-                      <span className="text-sm text-slate-500">/month</span>
+                      <span className="text-sm text-slate-500">/month (inc. GST)</span>
                     </div>
                   )}
                   <p className="text-xs text-slate-500 mt-1">{tier.description}</p>

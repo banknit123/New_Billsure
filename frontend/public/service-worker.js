@@ -29,11 +29,15 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Security: validate request is same-origin and safe
+// Security: validate request is same-origin and safe.
+// BUG FIX: the previous version was `a && b || c`, which due to operator
+// precedence (&& binds tighter than ||) evaluated as `(a && b) || c` —
+// meaning ANY http: request, regardless of origin, was treated as "safe".
+// The intent was clearly "same origin AND (https or http)".
 function isSafeRequest(request) {
   try {
     const url = new URL(request.url);
-    return url.origin === self.location.origin && url.protocol === 'https:' || url.protocol === 'http:';
+    return url.origin === self.location.origin && (url.protocol === 'https:' || url.protocol === 'http:');
   } catch {
     return false;
   }

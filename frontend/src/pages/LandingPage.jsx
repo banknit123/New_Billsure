@@ -64,7 +64,7 @@ const FAQ_DATA = [
   },
   {
     q: "Is my financial data secure?",
-    a: "Absolutely. We use AES-128 (Fernet) encryption for all sensitive data stored in our database. Bank account numbers, BSB codes, and routing numbers are encrypted at rest. We are PCI DSS compliant, meaning card data is processed exclusively by Stripe on their certified infrastructure. Your raw card numbers never touch our servers."
+    a: "Absolutely. We use AES-128 (Fernet) encryption for all sensitive data stored in our database — bank account numbers, BSB codes, and routing numbers are encrypted at rest before storage. Card payments are processed exclusively by Stripe, which is independently PCI DSS Level 1 certified — your raw card numbers never touch our servers."
   },
   {
     q: "What happens if I don't have enough in my wallet?",
@@ -80,7 +80,7 @@ const FAQ_DATA = [
   },
   {
     q: "What is BECS Direct Debit?",
-    a: "BECS (Bulk Electronic Clearing System) Direct Debit is the Australian standard for bank-to-bank transfers. It allows us to debit funds directly from your Australian bank account via Stripe's secure checkout. Your BSB and account details are collected by Stripe — never stored on our servers."
+    a: "BECS (Bulk Electronic Clearing System) Direct Debit is the Australian standard for bank-to-bank transfers. Depending on how you set it up, your bank-to-bank transfer is arranged either via Stripe's secure BECS checkout, or via a BillSure Direct Debit Request mandate — in which case your BSB and account number are encrypted (AES-128) before being stored so we can process the debit. Your card details, if you use a card, always go through Stripe and never touch our servers."
   },
   {
     q: "Is there a mobile app?",
@@ -208,7 +208,7 @@ export default function LandingPage() {
               <div className="flex items-center gap-4 text-xs text-slate-400">
                 <span className="flex items-center gap-1"><CheckCircle2 size={14} className="text-green-500" /> Free to sign up</span>
                 <span className="flex items-center gap-1"><Lock size={14} className="text-green-500" /> Bank-grade security</span>
-                <span className="flex items-center gap-1"><Shield size={14} className="text-green-500" /> PCI DSS compliant</span>
+                <span className="flex items-center gap-1"><Shield size={14} className="text-green-500" /> Bank-grade AES encryption</span>
               </div>
             </div>
             <div className="hidden lg:block relative">
@@ -455,8 +455,8 @@ export default function LandingPage() {
               <div className="space-y-4">
                 {[
                   { icon: CreditCard, title: 'Credit & Debit Cards', desc: 'Visa, Mastercard — instant top-ups via Stripe Checkout.' },
-                  { icon: Building2, title: 'BECS Direct Debit', desc: 'Pay directly from your Australian bank account. BSB and account details collected securely by Stripe.' },
-                  { icon: Shield, title: 'PCI DSS Compliant', desc: 'Your raw card and bank numbers never touch our servers. Stripe handles all sensitive payment data.' },
+                  { icon: Building2, title: 'BECS Direct Debit', desc: 'Pay directly from your Australian bank account. BSB and account details are encrypted (AES-128) before storage.' },
+                  { icon: Shield, title: 'Encrypted & Stripe-Secured', desc: 'Your raw card numbers never touch our servers — Stripe handles all card data. Bank details we do store (for direct debit) are encrypted at rest.' },
                 ].map((m, i) => (
                   <div key={i} className="flex gap-4 p-4 rounded-xl bg-white border border-slate-200 hover:shadow-sm transition-shadow">
                     <div className="w-10 h-10 rounded-lg bg-teal-50 flex items-center justify-center shrink-0">
@@ -500,18 +500,18 @@ export default function LandingPage() {
             {[
               {
                 icon: ShieldCheck,
-                title: 'PCI DSS Compliant',
-                desc: 'All card data is processed exclusively through Stripe\'s PCI Level 1 certified infrastructure. Raw card numbers never enter our system.',
+                title: 'Card Payments via Stripe',
+                desc: 'All card data is processed exclusively through Stripe\'s PCI DSS Level 1 certified infrastructure. Raw card numbers never enter our system.',
               },
               {
                 icon: Lock,
                 title: 'AES-128 Encryption',
-                desc: 'All sensitive financial data — bank accounts, BSB codes, routing numbers — is encrypted at rest using military-grade Fernet (AES-128-CBC) encryption.',
+                desc: 'All sensitive financial data we store — bank accounts, BSB codes, routing numbers — is encrypted at rest using Fernet (AES-128-CBC) encryption.',
               },
               {
                 icon: BadgeCheck,
                 title: 'Stripe Certified',
-                desc: 'Payments processed by Stripe, trusted by millions of businesses worldwide. Card and bank details are collected on Stripe\'s secure hosted pages.',
+                desc: 'Card payments are processed by Stripe, trusted by millions of businesses worldwide, on Stripe\'s own secure hosted pages.',
               },
               {
                 icon: Globe,
@@ -627,7 +627,7 @@ export default function LandingPage() {
               </p>
               <div className="flex items-center gap-2">
                 <Shield size={14} className="text-green-600" />
-                <span className="text-xs text-slate-400">PCI DSS Compliant</span>
+                <span className="text-xs text-slate-400">AES-encrypted &amp; Stripe-secured</span>
               </div>
             </div>
             {/* Product */}
