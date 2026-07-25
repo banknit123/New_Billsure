@@ -103,6 +103,28 @@ async def insert_one(table: str, data: dict) -> dict:
     return clean
 
 
+async def insert_many(table: str, rows: list) -> list:
+    """Insert multiple records in a single statement. Returns the inserted rows.
+
+    Using one multi-row INSERT (rather than N calls to insert_one) matters
+    beyond performance: several tables in the ledger migration rely on a
+    deferred constraint trigger that checks invariants across *all* rows
+    written in the same statement/transaction (e.g. that a journal's debits
+    equal its credits). Calling insert_one twice would run each as its own
+    transaction and the balance check would fail on the first row alone.
+    """
+    sb = get_supabase()
+    clean_rows = []
+    for data in rows:
+        clean = {k: v for k, v in data.items() if v is not None}
+        for k, v in clean.items():
+            if isinstance(v, datetime):
+                clean[k] = v.isoformat()
+        clean_rows.append(clean)
+    result = sb.table(table).insert(clean_rows).execute()
+    return result.data or []
+
+
 async def increment_wallet_balance(user_id: str, amount: float) -> bool:
     """Atomically increment (or decrement, for negative amount) a user's wallet_balance.
 
