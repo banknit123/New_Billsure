@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 import base64
 import re
@@ -31,6 +32,11 @@ from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import supabase_db as sdb
+import stripe
+import ledger
+import reconciliation
+import payment_runs
+import stripe_collections
 
 # Models
 from models.schemas import (
@@ -475,7 +481,18 @@ async def process_auto_payments(current_user: dict = Depends(get_current_user)):
 # Transaction routes
 @api_router.post("/transactions/deposit")
 async def deposit_to_wallet(payment: MockPayment, current_user: dict = Depends(get_current_user)):
-    # Mock payment - in production, integrate with Stripe/PayPal
+    # SECURITY: this is a mock payment endpoint — it credits real wallet
+    # balance for any amount the caller requests with no payment collected
+    # at all. Any logged-in user could mint themselves free money by
+    # calling it. Gated behind an explicit opt-in env var (same pattern as
+    # SEED_DEMO_DATA) so it keeps working for local dev/testing without
+    # Stripe configured, but is structurally impossible to hit unless
+    # someone deliberately enables it — never set ALLOW_MOCK_PAYMENTS=true
+    # in production. Use POST /payments/checkout (real Stripe) instead once
+    # Stripe is configured.
+    if os.environ.get("ALLOW_MOCK_PAYMENTS", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="Mock payments are disabled. Set ALLOW_MOCK_PAYMENTS=true for local/dev testing only — never in production.")
+
     transaction = Transaction(
         user_id=current_user["id"],
         type="deposit",
@@ -1486,6 +1503,91 @@ async def admin_payment_queue(admin_user: dict = Depends(get_admin_user)):
         "bills": queue,
     }
 
+
+# ===================== PAYMENT RUNS (prioritised, maker-checker bill payment) =====================
+# admin_pay_bill / admin_pay_bills_bulk above remain in place for now (the
+# frontend still calls them) but are superseded by this flow: it only pays a
+# bill out of the OWNING customer's own cleared, available ledger balance
+# (never wallet_balance / never another customer's money), requires a
+# second admin to approve, and only debits the ledger once a payment is
+# confirmed cleared rather than at the same moment as "mark paid". Plan to
+# retire admin_pay_bill/admin_pay_bills_bulk once the admin UI moves over —
+# see INTEGRATION_NOTES.md.
+
+@api_router.post("/admin/payment-runs")
+async def create_payment_run(horizon_days: int = 3, admin_user: dict = Depends(get_admin_user)):
+    return await payment_runs.build_payment_run(horizon_days=horizon_days, created_by=admin_user["id"])
+
+
+@api_router.get("/admin/payment-runs")
+async def list_payment_runs(admin_user: dict = Depends(get_admin_user)):
+    return await sdb.find_many("payment_runs", order_by="created_at", order_desc=True, limit=50)
+
+
+@api_router.get("/admin/payment-runs/{run_id}/items")
+async def list_payment_run_items(run_id: str, admin_user: dict = Depends(get_admin_user)):
+    return await sdb.find_many("payment_run_items", {"payment_run_id": run_id}, order_by="priority_rank")
+
+
+@api_router.post("/admin/payment-runs/{run_id}/approve")
+async def approve_payment_run_endpoint(run_id: str, admin_user: dict = Depends(get_admin_user)):
+    try:
+        return await payment_runs.approve_payment_run(run_id, approver_user_id=admin_user["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class ClearPaymentRunItemRequest(BaseModel):
+    provider_payment_reference: str = ""
+
+
+@api_router.post("/admin/payment-runs/items/{item_id}/submit")
+async def submit_payment_run_item(item_id: str, data: ClearPaymentRunItemRequest, admin_user: dict = Depends(get_admin_user)):
+    await payment_runs.mark_item_submitted(item_id, data.provider_payment_reference)
+    return {"status": "submitted"}
+
+
+@api_router.post("/admin/payment-runs/items/{item_id}/clear")
+async def clear_payment_run_item(item_id: str, data: ClearPaymentRunItemRequest, admin_user: dict = Depends(get_admin_user)):
+    """Call ONLY after independently confirming the BPAY/bank payment actually
+    executed — a receipt, or a bank statement line. This is the single place
+    the ledger is debited and bills.status flips to 'paid' for this item."""
+    try:
+        journal_id = await payment_runs.mark_item_cleared(
+            item_id, data.provider_payment_reference, cleared_by=admin_user["id"]
+        )
+        return {"status": "cleared", "journal_id": journal_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class FailPaymentRunItemRequest(BaseModel):
+    reason: str
+
+
+@api_router.post("/admin/payment-runs/items/{item_id}/fail")
+async def fail_payment_run_item(item_id: str, data: FailPaymentRunItemRequest, admin_user: dict = Depends(get_admin_user)):
+    await payment_runs.mark_item_failed(item_id, data.reason)
+    return {"status": "failed"}
+
+
+# ===================== RECONCILIATION =====================
+@api_router.get("/admin/reconciliation/latest")
+async def get_latest_reconciliation(admin_user: dict = Depends(get_admin_user)):
+    runs = await sdb.find_many("reconciliation_runs", order_by="run_at", order_desc=True, limit=1)
+    return runs[0] if runs else None
+
+
+@api_router.get("/admin/reconciliation/exceptions")
+async def get_open_reconciliation_exceptions(admin_user: dict = Depends(get_admin_user)):
+    return await sdb.find_many("reconciliation_exceptions", {"status": "open"})
+
+
+@api_router.post("/admin/reconciliation/run")
+async def trigger_reconciliation(admin_user: dict = Depends(get_admin_user)):
+    return await reconciliation.run_trust_reconciliation(triggered_by=admin_user["id"])
+
+
 # ===================== PAYMENT METHODS =====================
 @api_router.post("/payment-methods")
 async def add_payment_method(data: PaymentMethodCreate, current_user: dict = Depends(get_current_user)):
@@ -1547,6 +1649,48 @@ async def set_primary_payment_method(method_id: str, current_user: dict = Depend
     if not r:
         raise HTTPException(status_code=404, detail="Payment method not found")
     return {"message": "Primary payment method updated"}
+
+
+# ===================== TOKENIZED PAYMENT METHODS (real Stripe) =====================
+# These two endpoints are the server-side half of saving a payment method
+# that can actually be charged later without the customer present. The
+# browser half (Stripe Elements / Payment Element collecting card or BECS
+# details directly against the client_secret from create_setup_intent, so
+# raw details never reach this backend) is a separate frontend change — see
+# INTEGRATION_NOTES_STRIPE.md. Do NOT add raw card/account fields to any
+# request model that calls these; the whole point is that this backend
+# never sees them.
+
+@api_router.post("/payment-methods/setup-intent")
+async def start_payment_method_setup(current_user: dict = Depends(get_current_user)):
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+    try:
+        return await stripe_collections.create_setup_intent(current_user)
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe SetupIntent creation failed for user {current_user['id']}: {e}")
+        raise HTTPException(status_code=502, detail="Could not start payment method setup")
+
+
+class ConfirmSetupIntentRequest(BaseModel):
+    setup_intent_id: str
+    label: str = ""
+    is_primary: bool = False
+
+
+@api_router.post("/payment-methods/confirm-setup")
+async def confirm_payment_method_setup(data: ConfirmSetupIntentRequest, current_user: dict = Depends(get_current_user)):
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+    try:
+        return await stripe_collections.confirm_setup_intent_and_save(
+            current_user, data.setup_intent_id, label=data.label, is_primary=data.is_primary
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe SetupIntent confirmation failed for user {current_user['id']}: {e}")
+        raise HTTPException(status_code=502, detail="Could not confirm payment method")
 
 
 # ===================== SMART PAYMENT PLAN =====================
@@ -1637,7 +1781,17 @@ async def get_current_plan(current_user: dict = Depends(get_current_user)):
 
 @api_router.post("/payment-plan/simulate-deduction")
 async def simulate_deduction(current_user: dict = Depends(get_current_user)):
-    """Simulate a scheduled deduction from customer's payment method."""
+    """Simulate a scheduled deduction from customer's payment method.
+
+    SECURITY: same issue as deposit_to_wallet above — this credited real
+    wallet balance with no payment collected, callable by any logged-in
+    user, with no gating. Gated the same way. Use
+    POST /scheduler/trigger-now instead once a real payment method is
+    saved — that goes through actual Stripe collection.
+    """
+    if os.environ.get("ALLOW_MOCK_PAYMENTS", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="Mock payments are disabled. Set ALLOW_MOCK_PAYMENTS=true for local/dev testing only — never in production.")
+
     plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"]})
     if not plan or plan.get("status") != "active":
         raise HTTPException(status_code=400, detail="No active payment plan")
@@ -1918,7 +2072,12 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
                 {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
             )
             if transitioned:
-                await sdb.increment_wallet_balance(tx["user_id"], amount)
+                await ledger.record_contribution_cleared(
+                    user_id=tx["user_id"], amount=amount,
+                    reference_type="payment_transactions", reference_id=session_id,
+                    payment_method_type=tx.get("payment_method_type", "card"),
+                    description=f"Wallet top-up via Stripe (${amount:.2f})",
+                )
                 # Record in main transactions collection
                 tx_record = Transaction(
                     user_id=tx["user_id"],
@@ -1974,13 +2133,95 @@ async def stripe_webhook(request: Request):
                     {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
                 )
                 if transitioned:
-                    await sdb.increment_wallet_balance(tx["user_id"], amount)
+                    await ledger.record_contribution_cleared(
+                        user_id=tx["user_id"], amount=amount,
+                        reference_type="payment_transactions", reference_id=event.session_id,
+                        payment_method_type=tx.get("payment_method_type", "card"),
+                        description=f"Wallet top-up via Stripe (${amount:.2f})",
+                    )
                     await sdb.increment_active_plan_totals(tx["user_id"], collected_delta=amount)
 
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Webhook error: {e}")
         return {"status": "error"}
+
+
+@api_router.post("/webhook/stripe-payment-intents")
+async def stripe_payment_intent_webhook(request: Request):
+    """
+    Dedicated webhook for off-session PaymentIntents created by
+    stripe_collections.collect_scheduled_contribution() — kept separate
+    from stripe_webhook() above (which is built around the
+    emergentintegrations StripeCheckout wrapper and its Checkout-Session
+    event model) rather than assuming that wrapper also correctly surfaces
+    raw payment_intent.* events for PaymentIntents it didn't create. This
+    endpoint uses the official stripe-python SDK's own webhook
+    verification directly, which is the well-documented path for this.
+
+    Point a second webhook endpoint at this URL in the Stripe Dashboard,
+    subscribed to payment_intent.succeeded and payment_intent.payment_failed,
+    with its own signing secret in STRIPE_PAYMENT_INTENT_WEBHOOK_SECRET.
+    """
+    webhook_secret = os.environ.get("STRIPE_PAYMENT_INTENT_WEBHOOK_SECRET", "")
+    if not webhook_secret:
+        logger.error("STRIPE_PAYMENT_INTENT_WEBHOOK_SECRET not set — rejecting webhook")
+        return JSONResponse(status_code=500, content={"status": "not_configured"})
+
+    body = await request.body()
+    sig = request.headers.get("Stripe-Signature", "")
+    try:
+        event = stripe.Webhook.construct_event(body, sig, webhook_secret)
+    except (ValueError, stripe.error.SignatureVerificationError) as e:
+        logger.warning(f"Rejected payment-intent webhook: invalid signature/payload ({e})")
+        return JSONResponse(status_code=400, content={"status": "invalid_signature"})
+
+    pi = event["data"]["object"]
+    metadata = pi.get("metadata", {}) or {}
+    if metadata.get("kind") != "scheduled_contribution":
+        return {"status": "ignored"}  # not one of ours
+
+    attempt_id = metadata.get("collection_attempt_id")
+    user_id = metadata.get("billsure_user_id")
+    plan_id = metadata.get("payment_plan_id")
+
+    if event["type"] == "payment_intent.succeeded":
+        # Same atomic idempotency pattern as the Checkout Session paths
+        # above: only credit the ledger if this attempt hasn't already been
+        # marked succeeded by another code path (the synchronous branch in
+        # process_auto_deductions, or a duplicate webhook delivery).
+        transitioned = await sdb.update_one(
+            "collection_attempts",
+            {"id": attempt_id, "status": {"$ne": "succeeded"}},
+            {"$set": {"status": "succeeded", "stripe_payment_intent_id": pi["id"]}},
+        )
+        if transitioned:
+            amount = Decimal(pi["amount"]) / 100
+            method_type = metadata.get("payment_method_type", "card")
+            await ledger.record_contribution_cleared(
+                user_id=user_id, amount=amount,
+                reference_type="collection_attempts", reference_id=attempt_id,
+                payment_method_type=method_type,
+                description="Scheduled contribution cleared",
+            )
+            await sdb.increment_active_plan_totals(user_id, collected_delta=float(amount))
+            await sdb.update_one("payment_plans", {"id": plan_id}, {"$set": {
+                "last_collection_status": "succeeded", "consecutive_failures": 0,
+            }})
+
+    elif event["type"] == "payment_intent.payment_failed":
+        await sdb.update_one(
+            "collection_attempts", {"id": attempt_id, "status": {"$ne": "succeeded"}},
+            {"$set": {"status": "failed", "error_message": pi.get("last_payment_error", {}).get("message", "")}},
+        )
+        plan = await sdb.find_one("payment_plans", {"id": plan_id})
+        if plan:
+            await sdb.update_one("payment_plans", {"id": plan_id}, {"$set": {
+                "last_collection_status": "failed",
+                "consecutive_failures": (plan.get("consecutive_failures") or 0) + 1,
+            }})
+
+    return {"status": "ok"}
 
 
 @api_router.get("/payments/history")
@@ -1990,68 +2231,145 @@ async def get_payment_history(current_user: dict = Depends(get_current_user)):
     return txs
 
 
-# ===================== SCHEDULED AUTO-DEDUCTIONS & BILL PAYMENTS =====================
-async def process_auto_deductions():
-    """Background task: process scheduled deductions and auto-pay due bills."""
+# ===================== SCHEDULED CONTRIBUTION COLLECTION =====================
+# This used to also auto-pay bills directly out of wallet_balance in the same
+# loop. That's been removed: bill payment is now payment_runs' job
+# (payment_run_scheduler_loop below), which only pays a bill out of a
+# customer's own CLEARED, AVAILABLE ledger balance — this loop's only job is
+# making that balance real by actually collecting the money.
+#
+# CONSECUTIVE_FAILURE_LIMIT: after this many failed collection attempts in a
+# row for a plan, it's paused rather than retried indefinitely — a card that
+# keeps failing needs a human/customer to fix it, not an infinite retry loop
+# quietly doing nothing every 60 seconds forever.
+CONSECUTIVE_FAILURE_LIMIT = 3
+
+
+async def _collect_for_plan(plan: dict, now: datetime) -> dict:
+    """Charges one due payment plan's saved payment method for real via
+    Stripe, and advances the schedule / credits the ledger based on what
+    Stripe actually reports. Shared by the background loop and the manual
+    /scheduler/trigger-now endpoint so there is exactly one place this logic
+    lives."""
+    uid = plan["user_id"]
+    amount = plan["deduction_amount"]
+    freq = plan["frequency"]
+    next_date_str = (plan.get("next_deduction_date") or "")[:10]
+    idempotency_key = f"{plan['id']}:{next_date_str}"
+
+    result = await stripe_collections.collect_scheduled_contribution(
+        user_id=uid, amount=amount, payment_plan_id=plan["id"],
+        idempotency_key=idempotency_key,
+    )
+
+    await sdb.update_one("payment_plans", {"id": plan["id"]}, {"$set": {
+        "last_collection_attempt_at": now.isoformat(),
+        "last_collection_status": result["status"],
+    }})
+
+    if result["status"] == "no_payment_method":
+        logger.warning(f"Plan {plan['id']} (user {uid}) has no chargeable payment method — leaving next_deduction_date unchanged so it retries once one is added")
+        return result  # do NOT advance the schedule — nothing was attempted
+
+    if result["status"] == "succeeded":
+        # Card payments confirm synchronously. Same atomic idempotency
+        # pattern as the Checkout/webhook paths: only credit the ledger if
+        # this attempt hasn't already been credited (e.g. the webhook won
+        # the race, or this function ran twice for the same idempotency
+        # key — which insert-if-absent in collect_scheduled_contribution
+        # already prevents from reaching Stripe twice, but this is the
+        # second, independent guard on the ledger-credit side specifically).
+        transitioned = await sdb.update_one(
+            "collection_attempts",
+            {"id": result["collection_attempt_id"], "status": {"$ne": "credited"}},
+            {"$set": {"status": "credited"}},
+        )
+        if transitioned:
+            await ledger.record_contribution_cleared(
+                user_id=uid, amount=amount,
+                reference_type="collection_attempts", reference_id=result["collection_attempt_id"],
+                payment_method_type="card",
+                description=f"Scheduled {freq} contribution (${amount:.2f})",
+            )
+            await sdb.increment_active_plan_totals(uid, collected_delta=amount)
+        logger.info(f"Scheduled collection succeeded: ${amount:.2f} for user {uid}")
+
+    elif result["status"] == "processing":
+        # au_becs_debit — settles asynchronously. Ledger credit (and the
+        # BECS hold) happens later via /webhook/stripe-payment-intents.
+        logger.info(f"Scheduled collection processing (BECS): ${amount:.2f} for user {uid}, awaiting webhook")
+
+    elif result["status"] == "failed":
+        failures = (plan.get("consecutive_failures") or 0) + 1
+        updates = {"consecutive_failures": failures}
+        if failures >= CONSECUTIVE_FAILURE_LIMIT:
+            updates["status"] = "paused"
+            logger.error(f"Plan {plan['id']} (user {uid}) paused after {failures} consecutive collection failures")
+        await sdb.update_one("payment_plans", {"id": plan["id"]}, {"$set": updates})
+        logger.warning(f"Scheduled collection failed for user {uid}: {result.get('reason')}")
+
+    # Advance the schedule after any attempted charge (succeeded/processing/
+    # failed) — a failure is retried next cycle via consecutive_failures
+    # tracking, not by re-attempting immediately. no_payment_method already
+    # returned above without reaching here.
+    await sdb.update_one(
+        "payment_plans", {"id": plan["id"], "status": "active"},
+        {"$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}},
+    )
+    return result
+
+
+async def process_scheduled_collections():
+    """Background task: runs _collect_for_plan() for every due, active plan."""
     while True:
         try:
             now = datetime.now(timezone.utc)
             today_str = now.strftime('%Y-%m-%d')
-
-            # 1. Process plan deductions that are due
             active_plans = await sdb.find_many("payment_plans", {"status": "active"})
             for plan in active_plans:
-                next_date_str = plan.get("next_deduction_date", "")[:10]
+                next_date_str = (plan.get("next_deduction_date") or "")[:10]
                 if next_date_str and next_date_str <= today_str:
-                    uid = plan["user_id"]
-                    amount = plan["deduction_amount"]
-                    freq = plan["frequency"]
-
-                    # Deduct from wallet (simulate scheduled collection) — atomic, no lost updates
-                    await sdb.increment_wallet_balance(uid, amount)
-                    await sdb.increment_active_plan_totals(uid, collected_delta=amount)
-                    await sdb.update_one(
-                        "payment_plans",
-                        {"user_id": uid, "status": "active"},
-                        {"$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}}
-                    )
-                    # Record transaction
-                    tx = Transaction(
-                        user_id=uid,
-                        type="auto_deduction",
-                        amount=amount,
-                        description=f"Scheduled {freq} deduction (${amount:.2f})"
-                    )
-                    await sdb.insert_one("transactions", tx.model_dump())
-                    logger.info(f"Auto-deduction: ${amount:.2f} for user {uid}")
-
-            # 2. Auto-pay bills that are due today or overdue
-            pending_bills = await sdb.find_many("bills", {"status": "pending"})
-            for bill in pending_bills:
-                due_str = bill.get("due_date", "")[:10]
-                if due_str and due_str <= today_str:
-                    uid = bill["user_id"]
-                    amt = bill["amount"]
-                    user = await sdb.find_one("users", {"id": uid})
-                    if user and user.get("wallet_balance", 0) >= amt:
-                        # Pay the bill (atomic)
-                        await sdb.increment_wallet_balance(uid, -amt)
-                        await sdb.update_one("bills", {"id": bill["id"]}, {"$set": {"status": "paid"}})
-                        await sdb.increment_active_plan_totals(uid, paid_out_delta=amt)
-                        tx = Transaction(
-                            user_id=uid,
-                            type="auto_bill_payment",
-                            amount=amt,
-                            description=f"Auto-paid {bill['provider']} - {bill['category']} (${amt:.2f})"
-                        )
-                        await sdb.insert_one("transactions", tx.model_dump())
-                        logger.info(f"Auto-paid bill {bill['id']}: ${amt:.2f} for user {uid}")
-
+                    await _collect_for_plan(plan, now)
         except Exception as e:
-            logger.error(f"Auto-deduction scheduler error: {e}")
+            logger.error(f"Scheduled collection loop error: {e}")
 
-        # Run every 60 seconds
         await asyncio.sleep(60)
+
+
+# ===================== BILL PAYMENT: PRIORITISED RUNS =====================
+PAYMENT_RUN_INTERVAL_SECONDS = 6 * 60 * 60  # every 6 hours — bills don't need per-minute polling
+
+
+async def payment_run_scheduler_loop():
+    """Periodically builds a fresh payment run from whatever bills are due
+    and can actually be afforded from cleared, available customer balances.
+    Does NOT approve or execute anything — that stays a human decision (see
+    POST /admin/payment-runs/{id}/approve). This just keeps the admin queue
+    populated automatically instead of requiring someone to remember to
+    click 'create run'."""
+    while True:
+        try:
+            run = await payment_runs.build_payment_run(horizon_days=3, created_by=None)
+            if run["item_count"] > 0:
+                logger.info(f"Payment run {run['id']} built: {run['item_count']} bills, ${run['total_amount']} total — awaiting admin approval")
+        except Exception as e:
+            logger.error(f"Payment run scheduler error: {e}")
+        await asyncio.sleep(PAYMENT_RUN_INTERVAL_SECONDS)
+
+
+async def reconciliation_loop():
+    """Hourly trust-account reconciliation. approve_payment_run() refuses to
+    approve while the most recent run here has an open exception, so this
+    loop being healthy is a precondition for bills actually getting paid,
+    not just a reporting nicety."""
+    while True:
+        try:
+            result = await reconciliation.run_trust_reconciliation()
+            if result["status"] != "ok":
+                logger.error(f"Reconciliation variance detected: {result}")
+        except Exception as e:
+            logger.error(f"Reconciliation loop error: {e}")
+        await asyncio.sleep(3600)
 
 
 def _next_deduction_date(freq: str) -> datetime:
@@ -2066,58 +2384,32 @@ def _next_deduction_date(freq: str) -> datetime:
 
 @api_router.post("/scheduler/trigger-now")
 async def trigger_scheduler_now(current_user: dict = Depends(get_current_user)):
-    """Manually trigger the auto-deduction and bill payment cycle (for testing)."""
+    """
+    Manually trigger today's scheduled collection for the calling user's own
+    plan, for testing — without waiting for the 60-second background loop.
+
+    SECURITY NOTE — this previously called increment_wallet_balance()
+    directly, which meant any logged-in customer could call this repeatedly
+    to fabricate wallet balance for free (and then auto-pay a bill with it,
+    in the same request). It now goes through the exact same real Stripe
+    off-session charge as the background loop — calling it twice in the
+    same cycle is a no-op (idempotency_key is unique per plan+day), and no
+    money appears without an actual successful charge. Bill payment is no
+    longer triggered from here at all — see /admin/payment-runs/*.
+    """
     now = datetime.now(timezone.utc)
     today_str = now.strftime('%Y-%m-%d')
-    deductions_made = 0
-    bills_paid = 0
 
-    # Process plan deductions
     plan = await sdb.find_one("payment_plans", {"user_id": current_user["id"], "status": "active"})
-    if plan:
-        next_date_str = plan.get("next_deduction_date", "")[:10]
-        if next_date_str and next_date_str <= today_str:
-            amount = plan["deduction_amount"]
-            freq = plan["frequency"]
-            await sdb.increment_wallet_balance(current_user["id"], amount)
-            await sdb.increment_active_plan_totals(current_user["id"], collected_delta=amount)
-            await sdb.update_one(
-                "payment_plans",
-                {"user_id": current_user["id"], "status": "active"},
-                {"$set": {"next_deduction_date": _next_deduction_date(freq).isoformat()}}
-            )
-            tx = Transaction(
-                user_id=current_user["id"], type="auto_deduction", amount=amount,
-                description=f"Manual trigger: {freq} deduction (${amount:.2f})"
-            )
-            await sdb.insert_one("transactions", tx.model_dump())
-            deductions_made = 1
+    if not plan:
+        return {"message": "No active payment plan for this user", "result": None}
 
-    # Auto-pay due bills
-    pending_bills = await sdb.find_many("bills", {"user_id": current_user["id"], "status": "pending"})
-    user = await sdb.find_one("users", {"id": current_user["id"]})
-    balance = user.get("wallet_balance", 0) if user else 0
+    next_date_str = (plan.get("next_deduction_date") or "")[:10]
+    if not (next_date_str and next_date_str <= today_str):
+        return {"message": "Nothing due yet for this plan", "next_deduction_date": plan.get("next_deduction_date")}
 
-    for bill in pending_bills:
-        due_str = bill.get("due_date", "")[:10]
-        if due_str and due_str <= today_str and balance >= bill["amount"]:
-            amt = bill["amount"]
-            await sdb.increment_wallet_balance(current_user["id"], -amt)
-            await sdb.update_one("bills", {"id": bill["id"]}, {"$set": {"status": "paid"}})
-            await sdb.increment_active_plan_totals(current_user["id"], paid_out_delta=amt)
-            tx = Transaction(
-                user_id=current_user["id"], type="auto_bill_payment", amount=amt,
-                description=f"Auto-paid {bill['provider']} (${amt:.2f})"
-            )
-            await sdb.insert_one("transactions", tx.model_dump())
-            balance -= amt
-            bills_paid += 1
-
-    return {
-        "message": "Scheduler cycle triggered",
-        "deductions_made": deductions_made,
-        "bills_paid": bills_paid,
-    }
+    result = await _collect_for_plan(plan, now)
+    return {"message": "Collection attempted", "result": result}
 
 
 @api_router.get("/transactions/history")
@@ -2911,6 +3203,17 @@ async def startup_event():
     """Seed admin/test user (only if explicitly enabled) and start background schedulers."""
     sb = get_supabase_admin()
 
+    # Ledger system accounts (TRUST_BANK, FEES_RECEIVABLE, OPERATING,
+    # SUSPENSE) must exist before any of the loops below try to post a
+    # journal against them. Idempotent — safe to call on every startup.
+    await ledger.ensure_system_accounts()
+
+    def _start_background_loops():
+        asyncio.create_task(process_scheduled_collections())
+        asyncio.create_task(payment_run_scheduler_loop())
+        asyncio.create_task(reconciliation_loop())
+        asyncio.create_task(generate_notifications())
+
     # SECURITY FIX: this used to seed an admin account with a hardcoded
     # fallback password ('Admin123!') on every startup whenever
     # SEED_ADMIN_PASSWORD wasn't set — a well-known default that grants full
@@ -2919,9 +3222,8 @@ async def startup_event():
     # explicitly supplied via its own env var — there is no built-in
     # password. Skip and log clearly rather than falling back to a default.
     if os.environ.get('SEED_DEMO_DATA', 'false').lower() != 'true':
-        asyncio.create_task(process_auto_deductions())
-        asyncio.create_task(generate_notifications())
-        logger.info("SEED_DEMO_DATA not enabled — skipping demo account seeding. Auto-deduction scheduler and notification generator started.")
+        _start_background_loops()
+        logger.info("SEED_DEMO_DATA not enabled — skipping demo account seeding. Scheduled-collection, payment-run, reconciliation and notification loops started.")
         return
 
     SEED_ADMIN_EMAIL = os.environ.get('SEED_ADMIN_EMAIL', '')
@@ -2939,9 +3241,8 @@ async def startup_event():
     else:
         await _seed_test_user(sb, SEED_TEST_EMAIL, SEED_TEST_PASSWORD)
 
-    asyncio.create_task(process_auto_deductions())
-    asyncio.create_task(generate_notifications())
-    logger.info("Auto-deduction scheduler and notification generator started")
+    _start_background_loops()
+    logger.info("Scheduled-collection, payment-run, reconciliation and notification loops started")
 
 
 async def _seed_admin_user(sb, SEED_ADMIN_EMAIL: str, SEED_ADMIN_PASSWORD: str):

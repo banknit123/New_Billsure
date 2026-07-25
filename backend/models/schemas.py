@@ -192,6 +192,12 @@ class PaymentMethod(BaseModel):
     account_number_masked: Optional[str] = None
     card_last4: Optional[str] = None
     card_brand: Optional[str] = None
+    # Set only via stripe_collections.confirm_setup_intent_and_save() after
+    # real Stripe tokenization (SetupIntent). Rows created through the
+    # legacy POST /payment-methods raw-entry form leave this null and are
+    # correctly treated as not chargeable — see
+    # stripe_collections.get_chargeable_payment_method().
+    stripe_payment_method_id: Optional[str] = None
     is_primary: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
