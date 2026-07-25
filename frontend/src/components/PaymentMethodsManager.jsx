@@ -7,12 +7,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CreditCard, Building2, Plus, Trash2, Star, Loader2 } from 'lucide-react';
+import { CreditCard, Building2, Plus, Trash2, Star, Loader2, ShieldCheck } from 'lucide-react';
+import StripeCardSetup from './StripeCardSetup';
 
 const PaymentMethodsManager = ({ user, refreshUser }) => {
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showStripeAdd, setShowStripeAdd] = useState(false);
   const [form, setForm] = useState({ type: 'bank_account', label: '', bank_name: '', bsb: '', account_number: '', card_number: '', card_brand: '', is_primary: false });
   const [saving, setSaving] = useState(false);
 
@@ -66,9 +68,14 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
           </h2>
           <p className="text-sm text-slate-500 mt-1">Manage your bank accounts and cards for automatic deductions</p>
         </div>
-        <Button onClick={() => setShowAdd(true)} className="bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-payment-method-btn">
-          <Plus size={16} className="mr-1" /> Add Method
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setShowStripeAdd(true)} className="bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-card-stripe-btn">
+            <ShieldCheck size={16} className="mr-1" /> Add Card (Secure)
+          </Button>
+          <Button variant="outline" onClick={() => setShowAdd(true)} className="border-slate-300 text-sm" data-testid="add-payment-method-btn">
+            <Plus size={16} className="mr-1" /> Add Bank Account
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -80,9 +87,9 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
           <CardContent className="p-12 text-center">
             <CreditCard className="mx-auto text-slate-300 mb-3" size={40} />
             <p className="text-slate-500 text-sm">No payment methods added</p>
-            <p className="text-xs text-slate-400 mt-1">Add a bank account or card to enable automatic deductions</p>
-            <Button onClick={() => setShowAdd(true)} className="mt-4 bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-first-method-btn">
-              <Plus size={16} className="mr-1" /> Add Payment Method
+            <p className="text-xs text-slate-400 mt-1">Add a card to enable automatic deductions, or a bank account for reference</p>
+            <Button onClick={() => setShowStripeAdd(true)} className="mt-4 bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-first-method-btn">
+              <ShieldCheck size={16} className="mr-1" /> Add Card (Secure)
             </Button>
           </CardContent>
         </Card>
@@ -103,6 +110,11 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
                       <p className="text-sm font-medium text-slate-900">{m.label}</p>
                       {m.is_primary && (
                         <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-medium">Primary</span>
+                      )}
+                      {m.stripe_payment_method_id ? (
+                        <span className="text-xs bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-medium" data-testid={`autopay-ready-${m.id}`}>Auto-pay ready</span>
+                      ) : (
+                        <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium" data-testid={`manual-only-${m.id}`}>Manual only</span>
                       )}
                     </div>
                     <p className="text-xs text-slate-500">
@@ -129,12 +141,27 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
         </div>
       )}
 
-      {/* Add Dialog */}
+      {/* Add Card via Stripe (tokenized, usable for automatic deductions) */}
+      <Dialog open={showStripeAdd} onOpenChange={setShowStripeAdd}>
+        <DialogContent className="max-w-md" data-testid="add-card-stripe-dialog">
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Card</DialogTitle>
+          </DialogHeader>
+          <StripeCardSetup
+            onSaved={() => { setShowStripeAdd(false); fetch(); }}
+            onCancel={() => setShowStripeAdd(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Bank Account (reference only -- not chargeable automatically;
+          see stripe_payment_method_id comment in models/schemas.py) */}
       <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) resetForm(); }}>
         <DialogContent className="max-w-md" data-testid="add-payment-method-dialog">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Payment Method</DialogTitle>
+            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Bank Account</DialogTitle>
           </DialogHeader>
+          <p className="text-xs text-slate-500 -mt-2">For reference only — automatic deductions require a card added via "Add Card (Secure)".</p>
           <form onSubmit={add} className="space-y-4">
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-slate-600">Type</Label>

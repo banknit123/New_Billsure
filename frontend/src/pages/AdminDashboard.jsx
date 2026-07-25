@@ -5,11 +5,13 @@ import AdminHome from '../components/admin/AdminHome';
 import AdminOutstanding from '../components/admin/AdminOutstanding';
 import AdminCustomers from '../components/admin/AdminCustomers';
 import AdminPayments from '../components/admin/AdminPayments';
-import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut, Menu, X, Banknote } from 'lucide-react';
+import AdminPaymentRuns from '../components/admin/AdminPaymentRuns';
+import { LayoutDashboard, FileText, Users, ArrowLeft, LogOut, Menu, X, Banknote, ListChecks } from 'lucide-react';
 
 const adminNavItems = [
   { to: '/admin', icon: LayoutDashboard, label: 'Financial Overview', end: true },
   { to: '/admin/payments', icon: Banknote, label: 'Payment Processing' },
+  { to: '/admin/payment-runs', icon: ListChecks, label: 'Payment Runs' },
   { to: '/admin/outstanding', icon: FileText, label: 'Outstanding Bills' },
   { to: '/admin/customers', icon: Users, label: 'Customer Analytics' },
 ];
@@ -90,6 +92,7 @@ export default function AdminDashboard() {
           <Routes>
             <Route index element={<AdminHome />} />
             <Route path="payments" element={<AdminPayments />} />
+            <Route path="payment-runs" element={<AdminPaymentRuns />} />
             <Route path="outstanding" element={<AdminOutstanding />} />
             <Route path="customers" element={<AdminCustomers />} />
           </Routes>

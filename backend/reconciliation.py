@@ -27,6 +27,7 @@ starting point) and always immediately before a payment run is approved.
 """
 
 import logging
+import os
 from decimal import Decimal
 from typing import Optional
 
@@ -37,6 +38,38 @@ logger = logging.getLogger(__name__)
 
 # Any unresolved variance above this blocks new payment-run approvals.
 VARIANCE_TOLERANCE = Decimal("0.01")
+
+# reconciliation_exceptions used to just sit silently in a table — nobody
+# would notice a trust-account variance (a stop-ship issue; see
+# approve_payment_run()'s reconciliation gate) until someone happened to
+# check /admin/reconciliation/exceptions. OPS_ALERT_EMAIL is who gets
+# emailed the moment one is recorded.
+OPS_ALERT_EMAIL = os.environ.get("OPS_ALERT_EMAIL", "")
+
+
+async def _alert_ops(exception_type: str, run_id: str, amount: Decimal) -> None:
+    if not OPS_ALERT_EMAIL:
+        logger.warning(
+            "OPS_ALERT_EMAIL is not set — reconciliation exception was recorded "
+            "but nobody was emailed about it"
+        )
+        return
+    # Imported lazily (not at module load time) so reconciliation.py keeps
+    # working standalone against the fake in-memory DB in test_ledger_flow.py
+    # without needing utils.auth's full dependency chain (FastAPI, PyJWT,
+    # passlib, cryptography, the Supabase SDK) installed just to run that
+    # logic test.
+    from utils.auth import send_email
+    subject = f"BillSure reconciliation exception: {exception_type}"
+    body = (
+        f"<p>A trust-account reconciliation exception was just recorded.</p>"
+        f"<p><b>Type:</b> {exception_type}<br>"
+        f"<b>Amount variance:</b> ${amount}<br>"
+        f"<b>Reconciliation run:</b> {run_id}</p>"
+        f"<p>Payment run approval is blocked until this exception is resolved. "
+        f"Review it at /admin/reconciliation/exceptions.</p>"
+    )
+    await send_email(OPS_ALERT_EMAIL, subject, body)
 
 
 async def _fetch_external_trust_balance() -> Optional[Decimal]:
@@ -86,6 +119,7 @@ async def run_trust_reconciliation(triggered_by: Optional[str] = None) -> dict:
             f"RECONCILIATION FAILURE (internal): trust_ledger={trust_balance} "
             f"sum_customers={sum_customers} variance={internal_variance}"
         )
+        await _alert_ops("internal_variance", run["id"], internal_variance)
 
     if external_variance is not None and abs(external_variance) > VARIANCE_TOLERANCE:
         await sdb.insert_one("reconciliation_exceptions", {
@@ -96,6 +130,7 @@ async def run_trust_reconciliation(triggered_by: Optional[str] = None) -> dict:
             f"RECONCILIATION FAILURE (external): trust_ledger={trust_balance} "
             f"bank_balance={external_balance} variance={external_variance}"
         )
+        await _alert_ops("external_variance", run["id"], external_variance)
 
     return run
 
