@@ -223,7 +223,13 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
     payment_status TEXT DEFAULT 'initiated',
     status TEXT DEFAULT 'pending',
     payment_method_type TEXT DEFAULT 'card',
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    stripe_payment_intent TEXT,
+    -- NOT YET on the live table as of this writing (2026-07-26) --
+    -- check_payment_status()/stripe_webhook() in server.py both write
+    -- this column on the "paid" transition; confirm via information_schema
+    -- before relying on it, and add via an additive migration if missing.
+    paid_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_transactions_user ON payment_transactions(user_id);

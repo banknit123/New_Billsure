@@ -2064,10 +2064,6 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
             # one UPDATE will actually match a row (the other will affect zero rows),
             # so the wallet can never be credited twice for the same session.
             amount = tx["amount"]
-            await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-            await sdb.update_one("payment_transactions",
-                {"session_id": session_id},
-                {"$set": {"payment_status": "paid", "status": "completed"}}
             transitioned = await sdb.update_one(
                 "payment_transactions",
                 {"session_id": session_id, "payment_status": {"$ne": "paid"}},
@@ -2126,10 +2122,6 @@ async def stripe_webhook(request: Request):
             tx = await sdb.find_one("payment_transactions", {"session_id": event.session_id})
             if tx and tx.get("payment_status") != "paid":
                 amount = tx["amount"]
-                await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
-                await sdb.update_one("payment_transactions",
-                    {"session_id": event.session_id},
-                    {"$set": {"payment_status": "paid", "status": "completed"}}
                 # Atomic conditional transition — see matching comment in
                 # check_payment_status() above for why this prevents double-crediting
                 # when the webhook and a status-poll request race each other.
