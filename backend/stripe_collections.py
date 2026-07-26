@@ -114,15 +114,17 @@ async def confirm_setup_intent_and_save(user: dict, setup_intent_id: str, label:
     if pm_type == "card" and pm.card:
         display = {"card_last4": pm.card.last4, "card_brand": pm.card.brand}
     elif pm_type == "au_becs_debit" and pm.au_becs_debit:
-        display = {
-            "account_number_masked": "****" + (pm.au_becs_debit.last4 or ""),
-            "bank_name": pm.au_becs_debit.bank_name or "",
-        }
+        # Real Stripe au_becs_debit PaymentMethod objects only carry
+        # bsb_number, fingerprint, and last4 -- there is no bank_name field
+        # (confirmed against a real sandbox response; the original code
+        # assumed one existed and crashed with AttributeError on every
+        # BECS confirm-setup call).
+        display = {"account_number_masked": "****" + (pm.au_becs_debit.last4 or "")}
 
     row = await sdb.insert_one("payment_methods", {
         "user_id": user["id"],
         "type": "au_becs_debit" if pm_type == "au_becs_debit" else "card",
-        "label": label or (display.get("bank_name") or display.get("card_brand") or pm_type),
+        "label": label or (display.get("card_brand") or ("Bank Account" if pm_type == "au_becs_debit" else pm_type)),
         "stripe_payment_method_id": pm.id,
         "is_primary": is_primary,
         **display,

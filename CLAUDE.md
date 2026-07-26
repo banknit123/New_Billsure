@@ -453,8 +453,26 @@ in-browser click-through unreliable this session.
    real, not just in the mock test suite: a second attempt (from the
    in-process scheduler loop picking up the same due plan) correctly
    found the existing `credited` row and did not re-charge Stripe.
-   Still not tested: the `au_becs_debit` path specifically (SetupIntent
-   creation supports it; only `card` exercised against real Stripe so far).
+   **Also done:** tested `au_becs_debit` (AU bank Direct Debit) for real,
+   using Stripe's official test BSB `000000` / account `000123456`
+   (source: Stripe's own docs). Found and fixed a second real bug doing
+   this: `stripe_collections.confirm_setup_intent_and_save()` assumed
+   `pm.au_becs_debit.bank_name` exists — it doesn't; a real BECS
+   PaymentMethod object only carries `bsb_number`/`fingerprint`/`last4`.
+   Every real BECS confirm-setup call was hitting `AttributeError:
+   bank_name` (a 500). Fixed by dropping the bogus field access; `label`
+   now falls back to `"Bank Account"` for BECS instead of a nonexistent
+   bank name. After the fix: SetupIntent → confirmed with a real BECS
+   PaymentMethod + mandate acceptance → saved via
+   `POST /payment-methods/confirm-setup` (200, real
+   `stripe_payment_method_id`) → a direct off-session PaymentIntent charge
+   against it correctly returned `status=processing` (BECS settles
+   asynchronously, exactly as `_collect_for_plan`'s `processing` branch
+   expects). **Not verified**: the actual async settlement — that needs
+   Stripe's real webhook to reach `/webhook/stripe-payment-intents`,
+   which requires a publicly reachable URL (localhost isn't reachable
+   from Stripe's servers); untested until there's a real deployment or a
+   tunnel (ngrok etc.) to test against.
    Left the `requires_customer_action` path (Phase 3) logic-tested only —
    didn't try to force a real 3DS challenge this session.
 3. RLS Option B (sign the custom JWT with Supabase's own JWT secret so
