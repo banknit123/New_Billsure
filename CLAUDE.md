@@ -186,6 +186,32 @@ manual step, see Deployment below):
   "paid" transition, but the live `payment_transactions` table didn't
   have that column. Purely additive; confirmed live via
   `information_schema.columns` after applying.
+- **`backend/migrations/010_atomic_balance_helpers.sql` — FIXED, applied
+  live, found by the first real end-to-end Stripe test (2026-07-26):**
+  `increment_wallet_balance()` and `increment_active_plan_totals()` have
+  been defined in `schema.sql` since early in this project (the documented
+  fix for a wallet-balance race condition) and are called by
+  `supabase_db.py` — but **neither function actually existed on the live
+  database** (confirmed via `pg_proc`; likely never applied because
+  schema.sql's function section was added after the live tables were
+  first created some other way). This had been silently broken the whole
+  time Stripe was disconnected, because nothing had ever gotten far
+  enough through a real scheduled collection to call it. When it finally
+  ran for real: the Stripe charge succeeded, the ledger was correctly
+  credited (`collection_attempts.status = 'credited'`,
+  `customer_balances.ledger_balance` correct) — only the final
+  `payment_plans.total_collected` display-total update failed
+  (PGRST202, function not found), a real 500 on `/scheduler/trigger-now`.
+  **The money and the ledger were never wrong** — only a secondary,
+  denormalized display aggregate. Applied the missing functions live
+  (identical to schema.sql's existing definitions) and manually
+  backfilled the one affected plan's `total_collected` to match its real
+  ledger balance. Audited every other function schema.sql/migrations
+  define (`post_journal_entry`, `get_or_create_customer_ledger_account`,
+  `check_journal_balanced`, `audit_trigger_func`) against live `pg_proc`
+  — all present; the gap was isolated to these two, which predate the
+  ledger migrations and apparently were never applied when the live
+  tables were first set up some other way.
 - **Schema gap — FIXED (migration 006, applied live):** `models/schemas.py`'s
   `DirectDebitRequest` expects `signature`, `authorization_date`,
   `terms_accepted`, `max_payment_amount`, `provider`, `provider_type`,
@@ -416,12 +442,21 @@ in-browser click-through unreliable this session.
 
 1. Deploy the above (needs your actual hosting access — not something an
    agent without deploy credentials can do alone).
-2. **In progress:** Stripe test-mode key is connected and SetupIntent
-   creation verified end-to-end. Still need: complete a full save-a-card
-   → scheduled-charge cycle (confirm a `collection_attempts` row lands
-   and the ledger balance moves for real), and test the `au_becs_debit`
-   path specifically (SetupIntent creation supports it; not yet exercised
-   against real Stripe).
+2. **Done:** ran a full real save-a-card → scheduled-charge cycle against
+   the Stripe sandbox end to end (2026-07-26) — SetupIntent → confirmed
+   with Stripe's official `pm_card_visa` test token → saved via
+   `POST /payment-methods/confirm-setup` → forced the plan's
+   `next_deduction_date` due via SQL → `POST /scheduler/trigger-now` →
+   real off-session PaymentIntent charged (`pi_3TxK7l...`, $475.72) →
+   `collection_attempts.status = 'credited'` → `customer_balances.ledger_balance`
+   confirmed at $475.72. The idempotency guard was also verified for
+   real, not just in the mock test suite: a second attempt (from the
+   in-process scheduler loop picking up the same due plan) correctly
+   found the existing `credited` row and did not re-charge Stripe.
+   Still not tested: the `au_becs_debit` path specifically (SetupIntent
+   creation supports it; only `card` exercised against real Stripe so far).
+   Left the `requires_customer_action` path (Phase 3) logic-tested only —
+   didn't try to force a real 3DS challenge this session.
 3. RLS Option B (sign the custom JWT with Supabase's own JWT secret so
    `request.jwt.claims` works natively, then rewrite migration 008's
    policies against it) — approved in principle, deliberately **on hold
