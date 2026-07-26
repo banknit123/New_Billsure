@@ -238,14 +238,38 @@ external cron system can call instead:
 - `POST /api/internal/cron/reconciliation`
 
 All three require header `X-Cron-Secret: <CRON_SECRET>` and fail closed
-(503) if `CRON_SECRET` isn't set — there is no unauthenticated path. Set
-`SCHEDULER_MODE=cron` to stop starting the in-process loops for these three
-jobs (avoids double-running the same work); leave `SCHEDULER_MODE` unset or
-`loop` (the default) to keep today's behavior. `generate_notifications`
-always runs in-process regardless of this setting — it wasn't in scope for
-the durability fix. `reconciliation.py` now also emails `OPS_ALERT_EMAIL`
-(if set) the moment a `reconciliation_exceptions` row is created, instead
-of that row just sitting silently in a table.
+(503) if `CRON_SECRET` isn't set — there is no unauthenticated path.
+`generate_notifications` always runs in-process regardless of scheduler
+mode — it wasn't in scope for the durability fix.
+
+A third mode was added on top: `SCHEDULER_MODE=apscheduler` uses
+`backend/scheduler.py` — APScheduler with a **persistent Postgres job
+store** (survives a restart on schedule instead of restarting the
+interval from zero) plus a **Postgres advisory lock** held around each
+job's execution (so if two instances of this app are ever running at
+once, only one actually runs a given tick — the other loses the lock and
+skips that tick, logged not silent). Be precise about this: the
+persistent jobstore alone does NOT prevent double-running across
+instances — that's what the advisory lock is specifically for. Requires
+`DATABASE_URL`, a **direct** Postgres connection string (Supabase
+dashboard → Project Settings → Database → Connection string, "Session"
+pooler mode or direct — not "Transaction" mode, which can break the
+lock/unlock pairing) — distinct from `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`,
+which go through PostgREST and can't hold a session-scoped lock. Fails
+loudly at startup (doesn't silently fall back to another mode) if
+`DATABASE_URL` is unset while this mode is selected. Not live-tested end
+to end this session — no `DATABASE_URL` was available — only verified
+that `scheduler.py` imports cleanly and `server.py` is unaffected when
+this mode isn't selected (the default, `loop`, still is).
+
+Set `SCHEDULER_MODE` to `loop` (default), `cron`, or `apscheduler`.
+Whichever isn't selected doesn't also start for these three jobs —
+running two triggering mechanisms for the same jobs at once would
+double-run them. The `/internal/cron/*` endpoints stay registered in
+every mode (still gated by `CRON_SECRET`) for manual/ops-triggered runs.
+`reconciliation.py` also emails `OPS_ALERT_EMAIL` (if set) the moment a
+`reconciliation_exceptions` row is created, instead of that row just
+sitting silently in a table.
 
 ## Admin UI
 

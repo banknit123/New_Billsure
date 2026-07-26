@@ -2397,23 +2397,37 @@ async def reconciliation_loop():
         await asyncio.sleep(3600)
 
 
-# ===================== CRON-TRIGGERED SCHEDULING (alternative to the =====
-# in-process loops above) =====================
-# The three loops above only keep running for as long as this process stays
-# up. On a host that doesn't guarantee a single always-on process (serverless,
-# scale-to-zero, multiple replicas without leader election), that's not a
-# safe assumption. These endpoints expose the exact same underlying work as
-# stateless, idempotent HTTP calls an external cron system (cron-job.org,
-# GitHub Actions on a schedule, the host's own cron) can hit on a schedule —
-# durability then comes from the external scheduler, not from this process
-# surviving. Set SCHEDULER_MODE=cron to stop starting the in-process loops
-# for these three jobs (see _start_background_loops in startup_event) once
-# external cron is wired up, to avoid double-running the same work.
+# ===================== SCHEDULING MODES =====================
+# Three ways to trigger process_scheduled_collections / payment_run_scheduler_loop /
+# reconciliation_loop's underlying work, chosen via SCHEDULER_MODE:
 #
-# Auth is a shared secret rather than an admin JWT because external cron
-# systems generally can't hold a short-lived, refreshable user session.
-# Fails closed: if CRON_SECRET isn't set, these endpoints refuse every
-# request rather than running unauthenticated.
+#   loop (default)  — the in-process `while True: asyncio.sleep()` loops
+#                      defined above. Zero extra config, but the schedule
+#                      lives only in this process's memory (restart loses
+#                      it) and assumes exactly one instance is ever running.
+#   apscheduler      — backend/scheduler.py: APScheduler with a persistent
+#                      Postgres job store (survives restarts) plus a
+#                      Postgres advisory lock around each job (safe if
+#                      multiple instances run at once). Requires
+#                      DATABASE_URL — see scheduler.py's docstring.
+#   cron             — the /internal/cron/* endpoints below: stateless,
+#                      idempotent HTTP calls an external cron system hits
+#                      on a schedule. Durability comes from the external
+#                      scheduler rather than this process surviving.
+#
+# Whichever mode is NOT active for these three jobs, _start_background_loops
+# (in startup_event) does not also start it — running two triggering
+# mechanisms for the same jobs at once would double-run them.
+#
+# The /internal/cron/* endpoints stay registered regardless of
+# SCHEDULER_MODE (harmless — CRON_SECRET still gates them), so they're
+# always available for a manual/ops-triggered run even in loop or
+# apscheduler mode.
+#
+# Auth on the cron endpoints is a shared secret rather than an admin JWT
+# because external cron systems generally can't hold a short-lived,
+# refreshable user session. Fails closed: if CRON_SECRET isn't set, these
+# endpoints refuse every request rather than running unauthenticated.
 SCHEDULER_MODE = os.environ.get('SCHEDULER_MODE', 'loop').lower()
 CRON_SECRET = os.environ.get('CRON_SECRET', '')
 
@@ -3284,6 +3298,15 @@ async def startup_event():
                 "must call POST /api/internal/cron/{scheduled-collections,payment-run-queue,reconciliation} "
                 "with header X-Cron-Secret. generate_notifications still runs in-process."
             )
+        elif SCHEDULER_MODE == 'apscheduler':
+            import scheduler as persistent_scheduler
+            persistent_scheduler.start()
+            logger.info(
+                "SCHEDULER_MODE=apscheduler — scheduled-collections, payment-run-queue and "
+                "reconciliation are NOT started as in-process loops; backend/scheduler.py's "
+                "persistent-job-store scheduler owns them instead. generate_notifications "
+                "still runs in-process."
+            )
         else:
             asyncio.create_task(process_scheduled_collections())
             asyncio.create_task(payment_run_scheduler_loop())
@@ -3414,4 +3437,7 @@ async def _seed_test_user(sb, SEED_TEST_EMAIL: str, SEED_TEST_PASSWORD: str):
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    pass  # Supabase client handles its own cleanup
+    if SCHEDULER_MODE == 'apscheduler':
+        import scheduler as persistent_scheduler
+        persistent_scheduler.shutdown()
+    # Supabase client handles its own cleanup
