@@ -10,6 +10,7 @@ import LandingPage from './pages/LandingPage';
 import LegalPage from './pages/LegalPage';
 import ForgotPassword from './pages/ForgotPassword';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
+import CookieConsentBanner from './components/CookieConsentBanner';
 
 export const API = process.env.REACT_APP_BACKEND_URL + '/api';
 
@@ -84,6 +85,7 @@ function App() {
         </Routes>
         <Toaster richColors />
         <PWAInstallPrompt />
+        <CookieConsentBanner />
       </BrowserRouter>
     </AuthContext.Provider>
   );

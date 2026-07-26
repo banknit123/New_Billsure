@@ -27,6 +27,29 @@ def get_supabase() -> Client:
     return _client
 
 
+def _apply_filters(query, filters: dict):
+    """Apply MongoDB-style filter operators consistently across all query builders.
+
+    Supports plain equality (`{"field": value}`) plus `$in` and `$ne` operators
+    (`{"field": {"$in": [...]}}` / `{"field": {"$ne": value}}`). Previously each
+    of find_many/update_one/update_many/delete_one/delete_many implemented its
+    own ad-hoc subset of this (e.g. update_one only supported equality, so a
+    caller could not express "update this row only if status != 'paid'" — the
+    exact primitive needed for atomic idempotency checks like payment webhooks).
+    """
+    for k, v in filters.items():
+        if isinstance(v, dict):
+            if "$in" in v:
+                query = query.in_(k, v["$in"])
+            elif "$ne" in v:
+                query = query.neq(k, v["$ne"])
+            else:
+                raise ValueError(f"Unsupported filter operator for field {k!r}: {v!r}")
+        else:
+            query = query.eq(k, v)
+    return query
+
+
 # ============================================================
 # Generic CRUD helpers
 # ============================================================
@@ -35,8 +58,7 @@ async def find_one(table: str, filters: dict, exclude_fields: list = None) -> di
     """Find a single record matching all filters."""
     sb = get_supabase()
     query = sb.table(table).select("*")
-    for k, v in filters.items():
-        query = query.eq(k, v)
+    query = _apply_filters(query, filters)
     result = query.limit(1).execute()
     if result.data:
         row = result.data[0]
@@ -53,15 +75,7 @@ async def find_many(table: str, filters: dict = None, exclude_fields: list = Non
     sb = get_supabase()
     query = sb.table(table).select("*")
     if filters:
-        for k, v in filters.items():
-            if isinstance(v, dict):
-                # Handle special operators like $in
-                if "$in" in v:
-                    query = query.in_(k, v["$in"])
-                elif "$ne" in v:
-                    query = query.neq(k, v["$ne"])
-            else:
-                query = query.eq(k, v)
+        query = _apply_filters(query, filters)
     if order_by:
         query = query.order(order_by, desc=order_desc)
     query = query.limit(limit)
@@ -89,8 +103,59 @@ async def insert_one(table: str, data: dict) -> dict:
     return clean
 
 
+async def insert_many(table: str, rows: list) -> list:
+    """Insert multiple records in a single statement. Returns the inserted rows.
+
+    Using one multi-row INSERT (rather than N calls to insert_one) matters
+    beyond performance: several tables in the ledger migration rely on a
+    deferred constraint trigger that checks invariants across *all* rows
+    written in the same statement/transaction (e.g. that a journal's debits
+    equal its credits). Calling insert_one twice would run each as its own
+    transaction and the balance check would fail on the first row alone.
+    """
+    sb = get_supabase()
+    clean_rows = []
+    for data in rows:
+        clean = {k: v for k, v in data.items() if v is not None}
+        for k, v in clean.items():
+            if isinstance(v, datetime):
+                clean[k] = v.isoformat()
+        clean_rows.append(clean)
+    result = sb.table(table).insert(clean_rows).execute()
+    return result.data or []
+
+
+async def increment_wallet_balance(user_id: str, amount: float) -> bool:
+    """Atomically increment (or decrement, for negative amount) a user's wallet_balance.
+
+    Calls the increment_wallet_balance() Postgres function (schema.sql) which
+    performs `wallet_balance = wallet_balance + amount` in a single statement,
+    avoiding the read-then-write race condition of a plain update_one() $inc.
+    """
+    sb = get_supabase()
+    result = sb.rpc("increment_wallet_balance", {"p_user_id": user_id, "p_amount": amount}).execute()
+    return result.data is not None
+
+
+async def increment_active_plan_totals(user_id: str, collected_delta: float = 0, paid_out_delta: float = 0) -> None:
+    """Atomically increment total_collected / total_paid_out on a user's active payment plan."""
+    sb = get_supabase()
+    sb.rpc("increment_active_plan_totals", {
+        "p_user_id": user_id,
+        "p_collected_delta": collected_delta,
+        "p_paid_out_delta": paid_out_delta,
+    }).execute()
+
+
 async def update_one(table: str, filters: dict, updates: dict) -> bool:
-    """Update a single record matching filters."""
+    """Update a single record matching filters.
+
+    `filters` values may use `{"$ne": ...}` / `{"$in": [...]}` (see _apply_filters)
+    which makes it possible to express atomic conditional transitions, e.g.
+    only flip payment_status to "paid" if it isn't already "paid" — the DB
+    performs this as one statement, so concurrent callers (a webhook and a
+    status-poll request racing each other) can't both succeed.
+    """
     sb = get_supabase()
     # Handle $set and $inc operators from MongoDB syntax
     set_data = {}
@@ -104,7 +169,13 @@ async def update_one(table: str, filters: dict, updates: dict) -> bool:
         set_data = updates
 
     if inc_data:
-        # For increment operations, fetch current value first then update
+        # NOTE: this read-then-write path is NOT atomic and can lose updates
+        # under concurrent requests. The two known hot paths (users.wallet_balance
+        # and payment_plans.total_collected/total_paid_out) have been migrated to
+        # the atomic increment_wallet_balance()/increment_active_plan_totals()
+        # helpers above — call those instead of update_one(..., {"$inc": ...})
+        # for those fields. This fallback remains only for any other/future
+        # non-monetary increment use case.
         current = await find_one(table, filters)
         if not current:
             return False
@@ -115,8 +186,7 @@ async def update_one(table: str, filters: dict, updates: dict) -> bool:
         return False
 
     query = sb.table(table).update(set_data)
-    for k, v in filters.items():
-        query = query.eq(k, v)
+    query = _apply_filters(query, filters)
     result = query.execute()
     return bool(result.data)
 
@@ -127,11 +197,7 @@ async def update_many(table: str, filters: dict, updates: dict) -> int:
     set_data = updates.get("$set", updates)
 
     query = sb.table(table).update(set_data)
-    for k, v in filters.items():
-        if isinstance(v, dict) and "$in" in v:
-            query = query.in_(k, v["$in"])
-        else:
-            query = query.eq(k, v)
+    query = _apply_filters(query, filters)
     result = query.execute()
     return len(result.data) if result.data else 0
 
@@ -140,8 +206,7 @@ async def delete_one(table: str, filters: dict) -> bool:
     """Delete a single record matching filters."""
     sb = get_supabase()
     query = sb.table(table).delete()
-    for k, v in filters.items():
-        query = query.eq(k, v)
+    query = _apply_filters(query, filters)
     result = query.execute()
     return bool(result.data)
 
@@ -150,8 +215,7 @@ async def delete_many(table: str, filters: dict) -> int:
     """Delete multiple records matching filters. Returns count."""
     sb = get_supabase()
     query = sb.table(table).delete()
-    for k, v in filters.items():
-        query = query.eq(k, v)
+    query = _apply_filters(query, filters)
     result = query.execute()
     return len(result.data) if result.data else 0
 
@@ -161,8 +225,7 @@ async def count_documents(table: str, filters: dict = None) -> int:
     sb = get_supabase()
     query = sb.table(table).select("id", count="exact")
     if filters:
-        for k, v in filters.items():
-            query = query.eq(k, v)
+        query = _apply_filters(query, filters)
     result = query.execute()
     return result.count if result.count is not None else len(result.data or [])
 
@@ -173,7 +236,6 @@ async def find_with_fields(table: str, filters: dict = None, fields: list = None
     select_str = ",".join(fields) if fields else "*"
     query = sb.table(table).select(select_str)
     if filters:
-        for k, v in filters.items():
-            query = query.eq(k, v)
+        query = _apply_filters(query, filters)
     result = query.limit(limit).execute()
     return result.data or []

@@ -7,7 +7,7 @@ const SECTIONS = {
   privacy: {
     title: 'Privacy Policy',
     icon: Shield,
-    lastUpdated: '22 April 2026',
+    lastUpdated: '5 July 2026',
     content: [
       {
         heading: '1. About This Policy',
@@ -57,15 +57,17 @@ const SECTIONS = {
         heading: '6. Disclosure of Information',
         text: `We may disclose your personal information to:
 • Stripe Inc. — for payment processing (Stripe's privacy policy applies to data they process)
+• OpenAI (GPT-4o Vision), via our AI infrastructure provider Emergent — when you upload a bill (PDF, JPEG or PNG), the image and any text extracted from it is sent to these providers so the bill's details (provider, amount, due date, BPAY biller code and reference number) can be automatically read and pre-filled for you. This data is used only to extract those bill details and is not used by us to train any AI model.
 • Utility providers — only the minimum information necessary to process bill payments on your behalf (biller code, reference number, payment amount)
 • Law enforcement — if required by law, court order, or legal process
 • Professional advisors — accountants, lawyers, auditors bound by confidentiality
+• PostHog — website usage analytics, but only if you accept analytics cookies via our cookie banner; declining opts you out entirely
 
 We do NOT sell your personal information to third parties. We do NOT share your data with marketing or advertising companies.`
       },
       {
         heading: '7. Cross-Border Data Transfers',
-        text: `Your data is primarily stored in Australia. Some services we use (Stripe, cloud infrastructure) may process data in overseas locations including the United States. Where this occurs, we ensure appropriate safeguards are in place consistent with APP 8 requirements.`
+        text: `Your data is primarily stored in Australia. Some services we use — Stripe (payments), OpenAI and Emergent (AI-powered bill data extraction), and our cloud infrastructure providers — process data in overseas locations, including the United States. Where this occurs, we take reasonable steps to ensure the overseas recipient handles your information consistently with the Australian Privacy Principles, as required by APP 8.`
       },
       {
         heading: '8. Your Rights',
@@ -87,13 +89,15 @@ To exercise these rights, contact us at privacy@billsure.com.au. We will respond
       {
         heading: '10. Data Breach Notification',
         text: `In the event of an eligible data breach under the Notifiable Data Breaches (NDB) scheme, we will:
-• Notify the Office of the Australian Information Commissioner (OAIC) within 30 days
-• Notify affected individuals as soon as practicable
+• Assess a suspected breach within 30 days, as required by the scheme
+• Notify the Office of the Australian Information Commissioner (OAIC) and affected individuals as soon as practicable once we have reasonable grounds to believe an eligible breach has occurred
 • Take immediate steps to contain the breach and mitigate harm`
       },
       {
-        heading: '11. Cookies',
-        text: `We use essential cookies for authentication (JWT tokens stored in localStorage) and session management. We do not use third-party tracking cookies or advertising cookies.`
+        heading: '11. Cookies & Analytics',
+        text: `We use essential cookies/storage for authentication (session tokens stored in your browser's sessionStorage, cleared when you close your browser tab) and session management. These are required for the site to function and are not optional.
+
+With your consent, given via the cookie banner shown on your first visit, we also use PostHog to understand how the product is used (e.g. which pages are visited). You can decline analytics cookies at any time and continue using the full site — see the banner or clear your stored preference to change your choice. We do not use advertising cookies or share this data with advertisers.`
       },
       {
         heading: '12. Changes to This Policy',

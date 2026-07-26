@@ -248,53 +248,93 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
--- Service role bypasses RLS automatically, so these policies
--- are for anon/authenticated roles if needed later.
--- Our backend uses service_role key so it bypasses RLS.
+-- SECURITY FIX: the previous version of this file defined every policy below
+-- as `USING (TRUE)` / `WITH CHECK (TRUE)`. That is not a real access-control
+-- policy — it grants the `anon` and `authenticated` Postgres roles (i.e. the
+-- public Supabase anon key, which is always extractable from the deployed
+-- frontend bundle) unrestricted read/write access to every row in every
+-- table, including bank_details, direct_debit_requests and users.wallet_balance.
+--
+-- Our backend never queries Supabase directly with the anon/authenticated
+-- role — it always uses the service_role key (see supabase_db.py), which
+-- bypasses RLS entirely regardless of what policies exist. The frontend
+-- (frontend/src/supabaseClient.js) only uses its anon key for Supabase Auth
+-- (sign-in/sign-up), never for direct table queries.
+--
+-- Therefore the correct fix is: define NO permissive policies for
+-- anon/authenticated at all. With RLS enabled and zero policies, Postgres
+-- denies all access by default for any role that isn't exempted (service_role
+-- bypasses RLS independently of policies). This restores real row-level
+-- protection as a defense-in-depth layer behind the API's own auth checks.
+--
+-- If a legitimate future use case needs the frontend to query Supabase
+-- directly (bypassing the FastAPI backend), add a narrowly-scoped policy at
+-- that time, e.g.:
+--   CREATE POLICY bills_owner_select ON bills FOR SELECT
+--     USING (user_id = (SELECT id FROM users WHERE supabase_uid = auth.uid()));
 
--- Users: users can read only their own record
-CREATE POLICY users_self_select ON users FOR SELECT USING (TRUE);
-CREATE POLICY users_self_update ON users FOR UPDATE USING (TRUE);
+-- Drop the old permissive policies (safe/idempotent if this file is re-run
+-- against a database that already had the insecure version applied).
+DROP POLICY IF EXISTS users_self_select ON users;
+DROP POLICY IF EXISTS users_self_update ON users;
+DROP POLICY IF EXISTS bills_user_select ON bills;
+DROP POLICY IF EXISTS bills_user_insert ON bills;
+DROP POLICY IF EXISTS bills_user_update ON bills;
+DROP POLICY IF EXISTS bills_user_delete ON bills;
+DROP POLICY IF EXISTS tx_user_select ON transactions;
+DROP POLICY IF EXISTS tx_user_insert ON transactions;
+DROP POLICY IF EXISTS pp_user_select ON payment_plans;
+DROP POLICY IF EXISTS pp_user_insert ON payment_plans;
+DROP POLICY IF EXISTS pp_user_update ON payment_plans;
+DROP POLICY IF EXISTS pp_user_delete ON payment_plans;
+DROP POLICY IF EXISTS ps_user_all ON payment_structures;
+DROP POLICY IF EXISTS bd_user_all ON bank_details;
+DROP POLICY IF EXISTS ddr_user_all ON direct_debit_requests;
+DROP POLICY IF EXISTS pc_user_all ON provider_connections;
+DROP POLICY IF EXISTS pm_user_all ON payment_methods;
+DROP POLICY IF EXISTS notif_user_all ON notifications;
+DROP POLICY IF EXISTS sub_user_all ON subscriptions;
+DROP POLICY IF EXISTS audit_service ON audit_log;
 
--- Bills: users access only their own bills
-CREATE POLICY bills_user_select ON bills FOR SELECT USING (TRUE);
-CREATE POLICY bills_user_insert ON bills FOR INSERT WITH CHECK (TRUE);
-CREATE POLICY bills_user_update ON bills FOR UPDATE USING (TRUE);
-CREATE POLICY bills_user_delete ON bills FOR DELETE USING (TRUE);
+-- No replacement policies are created. RLS stays ENABLED (see ALTER TABLE
+-- statements above) with zero policies for anon/authenticated => default
+-- deny. Only the backend's service_role key can read/write these tables.
 
--- Transactions
-CREATE POLICY tx_user_select ON transactions FOR SELECT USING (TRUE);
-CREATE POLICY tx_user_insert ON transactions FOR INSERT WITH CHECK (TRUE);
+-- ============================================================
+-- ATOMIC BALANCE HELPERS (fixes wallet_balance race condition)
+-- ============================================================
+-- The Python data layer previously implemented "$inc" as read-then-write
+-- (fetch current value, add, write back), which loses updates under
+-- concurrent requests (e.g. two auto-deduction cycles touching the same
+-- user at once). These functions perform the increment atomically in a
+-- single SQL statement. Execute permission is restricted to service_role
+-- only — these must never be callable via the public anon/authenticated
+-- Supabase RPC surface.
 
--- Payment Plans
-CREATE POLICY pp_user_select ON payment_plans FOR SELECT USING (TRUE);
-CREATE POLICY pp_user_insert ON payment_plans FOR INSERT WITH CHECK (TRUE);
-CREATE POLICY pp_user_update ON payment_plans FOR UPDATE USING (TRUE);
-CREATE POLICY pp_user_delete ON payment_plans FOR DELETE USING (TRUE);
+CREATE OR REPLACE FUNCTION increment_wallet_balance(p_user_id TEXT, p_amount DOUBLE PRECISION)
+RETURNS DOUBLE PRECISION AS $$
+    UPDATE users
+    SET wallet_balance = COALESCE(wallet_balance, 0) + p_amount
+    WHERE id = p_user_id
+    RETURNING wallet_balance;
+$$ LANGUAGE sql;
 
--- Payment Structures
-CREATE POLICY ps_user_all ON payment_structures FOR ALL USING (TRUE);
+CREATE OR REPLACE FUNCTION increment_active_plan_totals(
+    p_user_id TEXT,
+    p_collected_delta DOUBLE PRECISION DEFAULT 0,
+    p_paid_out_delta DOUBLE PRECISION DEFAULT 0
+)
+RETURNS VOID AS $$
+    UPDATE payment_plans
+    SET total_collected = COALESCE(total_collected, 0) + p_collected_delta,
+        total_paid_out = COALESCE(total_paid_out, 0) + p_paid_out_delta
+    WHERE user_id = p_user_id AND status = 'active';
+$$ LANGUAGE sql;
 
--- Bank Details
-CREATE POLICY bd_user_all ON bank_details FOR ALL USING (TRUE);
-
--- Direct Debit
-CREATE POLICY ddr_user_all ON direct_debit_requests FOR ALL USING (TRUE);
-
--- Provider Connections
-CREATE POLICY pc_user_all ON provider_connections FOR ALL USING (TRUE);
-
--- Payment Methods
-CREATE POLICY pm_user_all ON payment_methods FOR ALL USING (TRUE);
-
--- Notifications
-CREATE POLICY notif_user_all ON notifications FOR ALL USING (TRUE);
-
--- Subscriptions
-CREATE POLICY sub_user_all ON subscriptions FOR ALL USING (TRUE);
-
--- Audit log: service role only (read-only for admins)
-CREATE POLICY audit_service ON audit_log FOR ALL USING (TRUE);
+REVOKE ALL ON FUNCTION increment_wallet_balance(TEXT, DOUBLE PRECISION) FROM PUBLIC;
+REVOKE ALL ON FUNCTION increment_active_plan_totals(TEXT, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION increment_wallet_balance(TEXT, DOUBLE PRECISION) TO service_role;
+GRANT EXECUTE ON FUNCTION increment_active_plan_totals(TEXT, DOUBLE PRECISION, DOUBLE PRECISION) TO service_role;
 
 -- ============================================================
 -- AUDIT TRIGGER FUNCTION
