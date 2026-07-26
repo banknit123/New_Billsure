@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { useAuth } from '../../App';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   ListChecks, Loader2, CheckCircle2, AlertTriangle, ShieldCheck,
-  ChevronDown, ChevronUp, Send, XCircle, RefreshCw,
+  ChevronDown, ChevronUp, Send, XCircle, RefreshCw, UserCheck,
 } from 'lucide-react';
 
 const API = process.env.REACT_APP_BACKEND_URL + '/api';
@@ -26,6 +27,7 @@ const ITEM_STATUS_STYLES = {
 };
 
 const AdminPaymentRuns = () => {
+  const { user } = useAuth();
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -276,17 +278,34 @@ const AdminPaymentRuns = () => {
           {runs.map(run => {
             const isExpanded = expandedRun === run.id;
             const items = runItems[run.id] || [];
+            // Maker-checker: the backend already refuses to let whoever
+            // created a run also approve it (POST .../approve returns 400).
+            // Surfacing that here BEFORE they click, rather than only as an
+            // error toast after, is what Phase 6 specifically asked for.
+            const createdByMe = !!user?.id && run.created_by === user.id;
+            const createdByUnknown = !run.created_by;
             return (
               <Card key={run.id} className="border-slate-200 shadow-sm" data-testid={`payment-run-${run.id}`}>
                 <CardHeader className="px-6 py-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => toggleRun(run.id)}>
                   <div className="flex items-center justify-between flex-wrap gap-3">
                     <div className="flex items-center gap-3">
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <CardTitle className="text-sm font-semibold text-slate-900">Run {run.id.slice(0, 8)}</CardTitle>
                           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_STYLES[run.status] || 'bg-slate-100 text-slate-600'}`}>
                             {run.status}
                           </span>
+                          {run.status === 'pending_approval' && (
+                            createdByMe ? (
+                              <span className="flex items-center gap-1 text-xs bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded font-medium" data-testid={`created-by-me-${run.id}`}>
+                                <UserCheck size={11} /> Created by you — needs another admin
+                              </span>
+                            ) : !createdByUnknown ? (
+                              <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium" data-testid={`created-by-other-${run.id}`}>
+                                Created by another admin
+                              </span>
+                            ) : null
+                          )}
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {run.item_count} bill{run.item_count !== 1 ? 's' : ''} · ${Number(run.total_amount).toFixed(2)} · created {new Date(run.created_at).toLocaleString()}
@@ -296,11 +315,12 @@ const AdminPaymentRuns = () => {
                     <div className="flex items-center gap-2">
                       {run.status === 'pending_approval' && (
                         <Button size="sm" onClick={(e) => { e.stopPropagation(); handleApprove(run.id); }}
-                          disabled={approving[run.id]}
-                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8"
+                          disabled={approving[run.id] || createdByMe}
+                          title={createdByMe ? "You created this run — a different admin must approve it (maker-checker)" : undefined}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs h-8 disabled:opacity-50"
                           data-testid={`approve-run-${run.id}`}>
                           {approving[run.id] ? <Loader2 className="animate-spin mr-1" size={12} /> : <CheckCircle2 size={12} className="mr-1" />}
-                          Approve
+                          {createdByMe ? 'Needs another admin' : 'Approve'}
                         </Button>
                       )}
                       {isExpanded ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}

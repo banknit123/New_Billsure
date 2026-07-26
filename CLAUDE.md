@@ -314,9 +314,14 @@ real Stripe test-mode account) in `test_stripe_collections.py`.
 "Payment Runs") covers the `/admin/payment-runs/*` and
 `/admin/reconciliation/*` endpoints: reconciliation status banner with a
 manual "Run Reconciliation Now" button, build/list payment runs, expand a
-run to see its items, approve a run (maker-checker enforced server-side —
-approving your own run will 400), and per-item submit/clear/fail with a
-provider-reference field. `admin_pay_bill`/`admin_pay_bills_bulk` (the
+run to see its items, approve a run, and per-item submit/clear/fail with a
+provider-reference field. Maker-checker is enforced server-side
+(approving your own run 400s) **and** surfaced proactively in the UI —
+each pending-approval run shows "Created by you — needs another admin"
+(Approve button disabled, with a tooltip explaining why) or "Created by
+another admin", using the logged-in admin's own id from `useAuth()`
+compared against `run.created_by`, rather than only finding out via an
+error toast after clicking. `admin_pay_bill`/`admin_pay_bills_bulk` (the
 `AdminPayments.jsx` page) still work and are unaffected — payment runs are
 additive, not a replacement, until the frontend fully moves over per the
 original integration notes.
