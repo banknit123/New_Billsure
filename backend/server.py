@@ -1,7 +1,21 @@
+from pathlib import Path
+from dotenv import load_dotenv
+
+# MUST run before any local module import below -- several of them
+# (stripe_collections.py's STRIPE_API_KEY, utils/auth.py's JWT_SECRET/
+# ENCRYPTION_KEY/RESEND_API_KEY) read os.environ at their own module
+# top-level, not lazily inside a function. If load_dotenv() ran after
+# those imports (as it used to, at the bottom of this import block), a
+# .env file's values would silently never reach them -- the module-level
+# variable is already bound to "" by the time .env loads, and nothing
+# re-reads it later. Found this while testing a real STRIPE_API_KEY
+# locally: it kept resolving to "not set" despite being in .env.
+ROOT_DIR = Path(__file__).parent
+load_dotenv(ROOT_DIR / '.env')
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse, JSONResponse
-from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import Limiter
@@ -12,7 +26,6 @@ import logging
 import asyncio
 import csv
 import secrets
-from pathlib import Path
 from typing import List, Optional, Dict
 from pydantic import BaseModel
 import uuid
@@ -54,9 +67,6 @@ from utils.auth import (
     send_email, RESEND_API_KEY, SENDER_EMAIL, get_supabase_admin,
     security, pwd_context, SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_HOURS,
 )
-
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
 
 # Create the main app
 app = FastAPI()
