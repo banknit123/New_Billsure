@@ -1,6 +1,27 @@
 -- ============================================================
 -- EasyBillsPay — Supabase Postgres Schema
 -- ============================================================
+-- This file is the ORIGINAL base schema, kept in sync with the live
+-- database's core tables (columns below were verified against
+-- information_schema.columns on the live EasyBillsPay project). It does
+-- NOT duplicate everything migrations 002-007 added on top -- re-pasting
+-- that DDL here would just be a second copy that can drift from the
+-- migration files themselves. For the full picture, this file plus
+-- backend/migrations/002_ledger_and_reconciliation.sql through
+-- 007_rls_default_deny.sql together are the live schema. Specifically,
+-- NOT reflected below:
+--   - New tables: bank_accounts, collection_attempts, disclosure_acknowledgements,
+--     fund_holds, journal_entries, ledger_accounts, ledger_postings,
+--     payment_runs, payment_run_items, reconciliation_runs,
+--     reconciliation_exceptions, refunds, plus the customer_balances /
+--     ledger_account_balances views (all from migrations 002/003/005).
+--   - audit_trigger_func() below (line ~325) is the ORIGINAL version --
+--     migration 005 replaces it with a version that uses a jsonb lookup
+--     for user_id instead of assuming every audited table has that column
+--     (several of the new tables above don't).
+--   - The RLS section further down (dropping permissive USING(true)
+--     policies to real default-deny) DOES already reflect the live state
+--     applied via migration 007.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -19,7 +40,13 @@ CREATE TABLE IF NOT EXISTS users (
     stripe_customer_id TEXT DEFAULT '',
     role TEXT DEFAULT 'customer',
     subscription_fee DOUBLE PRECISION DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    -- Links a row to its Supabase Auth identity, when the user authenticated
+    -- that way (utils/auth.py's get_current_user falls back to Supabase Auth
+    -- token verification and backfills this column the first time it matches
+    -- by email) -- most auth still goes through the custom JWT path, which
+    -- doesn't use this column at all.
+    supabase_uid TEXT
 );
 
 -- ============================================================
@@ -42,7 +69,12 @@ CREATE TABLE IF NOT EXISTS bills (
     paid_at TEXT,
     payment_reference TEXT,
     is_auto_paid BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    -- Added by migration 005 (payment-time verification / manual review):
+    last_verified_account_number TEXT,
+    last_verified_biller_code TEXT,
+    insufficient_funds_action TEXT,
+    insufficient_funds_action_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills(user_id);
@@ -78,7 +110,14 @@ CREATE TABLE IF NOT EXISTS payment_plans (
     status TEXT DEFAULT 'active',
     total_collected DOUBLE PRECISION DEFAULT 0,
     total_paid_out DOUBLE PRECISION DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    -- Added by migration 003 (scheduled collection tracking):
+    last_collection_attempt_at TIMESTAMPTZ,
+    last_collection_status TEXT,
+    consecutive_failures INTEGER DEFAULT 0,
+    -- Added by migration 005 (contribution schedule approval step):
+    schedule_approved_at TIMESTAMPTZ,
+    schedule_approved_by TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_payment_plans_user_id ON payment_plans(user_id);
@@ -127,12 +166,25 @@ CREATE TABLE IF NOT EXISTS direct_debit_requests (
     account_number TEXT DEFAULT '',
     account_holder_name TEXT DEFAULT '',
     account_type TEXT DEFAULT 'savings',
+    -- debit_amount/debit_frequency are from this table's original design;
+    -- left in place, unused by current code -- see payment_frequency /
+    -- max_payment_amount below, which is what models.schemas.DirectDebitRequest
+    -- actually reads/writes (added via migration 006, added here to match).
     debit_amount DOUBLE PRECISION DEFAULT 0,
     debit_frequency TEXT DEFAULT 'monthly',
     status TEXT DEFAULT 'active',
     stripe_mandate_id TEXT,
     stripe_payment_method_id TEXT,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    provider TEXT DEFAULT '',
+    provider_type TEXT DEFAULT '',
+    provider_account_number TEXT DEFAULT '',
+    payment_frequency TEXT DEFAULT 'monthly',
+    max_payment_amount DOUBLE PRECISION DEFAULT 0,
+    start_date TEXT DEFAULT '',
+    authorization_date TEXT DEFAULT '',
+    signature TEXT DEFAULT '',
+    terms_accepted BOOLEAN DEFAULT TRUE
 );
 
 -- ============================================================
@@ -163,7 +215,10 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     account_number_masked TEXT DEFAULT '',
     stripe_payment_method_id TEXT DEFAULT '',
     is_primary BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    bank_name TEXT DEFAULT '',
+    card_last4 TEXT DEFAULT '',
+    card_brand TEXT DEFAULT ''
 );
 
 -- ============================================================

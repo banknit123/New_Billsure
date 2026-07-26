@@ -27,8 +27,11 @@ starting point) and always immediately before a payment run is approved.
 """
 
 import logging
+import os
 from decimal import Decimal
 from typing import Optional
+
+import httpx
 
 import supabase_db as sdb
 import ledger
@@ -37,6 +40,93 @@ logger = logging.getLogger(__name__)
 
 # Any unresolved variance above this blocks new payment-run approvals.
 VARIANCE_TOLERANCE = Decimal("0.01")
+
+# reconciliation_exceptions used to just sit silently in a table — nobody
+# would notice a trust-account variance (a stop-ship issue; see
+# approve_payment_run()'s reconciliation gate) until someone happened to
+# check /admin/reconciliation/exceptions. OPS_ALERT_EMAIL is who gets
+# emailed the moment one is recorded.
+OPS_ALERT_EMAIL = os.environ.get("OPS_ALERT_EMAIL", "")
+
+# Separate, pluggable alert channel -- see ALERTING.md. Deliberately not
+# tied to any specific alerting service: POSTs a plain-text summary to
+# whatever URL this points at (a Slack incoming webhook, PagerDuty's
+# generic webhook, an internal endpoint, etc.), so the choice of service
+# stays entirely in your control via this one env var, not in code.
+RECONCILIATION_ALERT_WEBHOOK_URL = os.environ.get("RECONCILIATION_ALERT_WEBHOOK_URL", "")
+
+
+async def _alert_ops(exception_type: str, run_id: str, amount: Decimal) -> None:
+    if not OPS_ALERT_EMAIL:
+        logger.warning(
+            "OPS_ALERT_EMAIL is not set — reconciliation exception was recorded "
+            "but nobody was emailed about it"
+        )
+        return
+    # Imported lazily (not at module load time) so reconciliation.py keeps
+    # working standalone against the fake in-memory DB in test_ledger_flow.py
+    # without needing utils.auth's full dependency chain (FastAPI, PyJWT,
+    # passlib, cryptography, the Supabase SDK) installed just to run that
+    # logic test.
+    from utils.auth import send_email
+    subject = f"BillSure reconciliation exception: {exception_type}"
+    body = (
+        f"<p>A trust-account reconciliation exception was just recorded.</p>"
+        f"<p><b>Type:</b> {exception_type}<br>"
+        f"<b>Amount variance:</b> ${amount}<br>"
+        f"<b>Reconciliation run:</b> {run_id}</p>"
+        f"<p>Payment run approval is blocked until this exception is resolved. "
+        f"Review it at /admin/reconciliation/exceptions.</p>"
+    )
+    await send_email(OPS_ALERT_EMAIL, subject, body)
+
+
+async def notify_reconciliation_exception(exception: dict) -> None:
+    """Pluggable alert hook, fired the moment a reconciliation_exceptions
+    row is created. POSTs a plain-text summary to
+    RECONCILIATION_ALERT_WEBHOOK_URL if set -- deliberately not wired to
+    any specific alerting service, so it works with whatever webhook you
+    actually have (Slack, PagerDuty, an internal endpoint) without a code
+    change, see ALERTING.md.
+
+    Never fails silently: if the env var isn't set, or the POST itself
+    fails, this logs at ERROR level rather than doing nothing -- a
+    reconciliation exception with no working alert channel is itself
+    something that needs to be noticed, not swallowed.
+    """
+    summary = (
+        f"BillSure reconciliation exception: {exception.get('exception_type')}\n"
+        f"Amount variance: ${exception.get('amount')}\n"
+        f"Reconciliation run: {exception.get('reconciliation_run_id')}\n"
+        f"Exception id: {exception.get('id')}\n"
+        f"Payment run approval is blocked until this exception is resolved. "
+        f"Review it at /admin/reconciliation/exceptions."
+    )
+
+    if not RECONCILIATION_ALERT_WEBHOOK_URL:
+        logger.error(
+            "RECONCILIATION_ALERT_WEBHOOK_URL is not set -- a reconciliation "
+            f"exception was just recorded ({exception.get('exception_type')}, "
+            f"${exception.get('amount')} variance) and NO WEBHOOK ALERT WAS SENT. "
+            "Set RECONCILIATION_ALERT_WEBHOOK_URL so this stops sitting silently "
+            "in a table with nobody told -- see ALERTING.md."
+        )
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                RECONCILIATION_ALERT_WEBHOOK_URL,
+                content=summary,
+                headers={"Content-Type": "text/plain"},
+            )
+            resp.raise_for_status()
+    except Exception as e:
+        logger.error(
+            f"Failed to POST reconciliation alert to RECONCILIATION_ALERT_WEBHOOK_URL: {e} "
+            f"-- exception {exception.get('id')} ({exception.get('exception_type')}) was "
+            "recorded but the webhook alert did not go through."
+        )
 
 
 async def _fetch_external_trust_balance() -> Optional[Decimal]:
@@ -78,7 +168,7 @@ async def run_trust_reconciliation(triggered_by: Optional[str] = None) -> dict:
     })
 
     if abs(internal_variance) > VARIANCE_TOLERANCE:
-        await sdb.insert_one("reconciliation_exceptions", {
+        exc = await sdb.insert_one("reconciliation_exceptions", {
             "reconciliation_run_id": run["id"], "exception_type": "internal_variance",
             "amount": str(internal_variance),
         })
@@ -86,9 +176,11 @@ async def run_trust_reconciliation(triggered_by: Optional[str] = None) -> dict:
             f"RECONCILIATION FAILURE (internal): trust_ledger={trust_balance} "
             f"sum_customers={sum_customers} variance={internal_variance}"
         )
+        await _alert_ops("internal_variance", run["id"], internal_variance)
+        await notify_reconciliation_exception(exc)
 
     if external_variance is not None and abs(external_variance) > VARIANCE_TOLERANCE:
-        await sdb.insert_one("reconciliation_exceptions", {
+        exc = await sdb.insert_one("reconciliation_exceptions", {
             "reconciliation_run_id": run["id"], "exception_type": "external_variance",
             "amount": str(external_variance),
         })
@@ -96,6 +188,8 @@ async def run_trust_reconciliation(triggered_by: Optional[str] = None) -> dict:
             f"RECONCILIATION FAILURE (external): trust_ledger={trust_balance} "
             f"bank_balance={external_balance} variance={external_variance}"
         )
+        await _alert_ops("external_variance", run["id"], external_variance)
+        await notify_reconciliation_exception(exc)
 
     return run
 

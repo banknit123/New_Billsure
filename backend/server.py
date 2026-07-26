@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Form, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse, JSONResponse
 from dotenv import load_dotenv
@@ -11,6 +11,7 @@ import os
 import logging
 import asyncio
 import csv
+import secrets
 from pathlib import Path
 from typing import List, Optional, Dict
 from pydantic import BaseModel
@@ -1922,6 +1923,14 @@ async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
         elif total_pending > u.get("wallet_balance", 0):
             risk = "medium"
 
+        # Surfaces plans stuck needing the customer to complete extra card
+        # authentication (Stripe returned "requires_action" on an
+        # off-session charge -- see _collect_for_plan in this file). The
+        # ledger is never credited for these, and the schedule doesn't
+        # advance, so without this an admin has no way to notice a
+        # customer's contribution is silently stuck.
+        last_status = plan.get("last_collection_status") if plan else None
+
         analytics.append({
             "user_id": uid,
             "name": u.get("full_name", ""),
@@ -1935,6 +1944,8 @@ async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
             "has_plan": plan is not None and plan.get("status") == "active",
             "plan_frequency": plan.get("frequency") if plan else None,
             "risk_level": risk,
+            "last_collection_status": last_status,
+            "needs_attention": last_status == "requires_customer_action",
         })
     return {"customers": analytics, "total": len(analytics)}
 
@@ -2269,6 +2280,45 @@ async def _collect_for_plan(plan: dict, now: datetime) -> dict:
         logger.warning(f"Plan {plan['id']} (user {uid}) has no chargeable payment method — leaving next_deduction_date unchanged so it retries once one is added")
         return result  # do NOT advance the schedule — nothing was attempted
 
+    if result["status"] == "requires_customer_action":
+        # Off-session confirmation hit Stripe's authentication_required path
+        # (see stripe_collections.collect_scheduled_contribution) — the card
+        # needs an interactive 3D Secure / SCA challenge this backend can't
+        # complete on the customer's behalf. Do NOT credit the ledger (no
+        # branch below does), and do NOT advance next_deduction_date — the
+        # collection_attempts row is idempotency-keyed to this cycle, so
+        # leaving the schedule where it is means every subsequent tick keeps
+        # reporting the same stuck state (visible via last_collection_status
+        # below) rather than silently moving on and permanently skipping
+        # this contribution. Surfaced two ways: a customer-facing
+        # notification here, and admin visibility via needs_attention in
+        # GET /admin/customer-analytics.
+        existing_notif = await sdb.find_one("notifications", {
+            "user_id": uid, "type": "payment_requires_action",
+            "bill_id": result.get("collection_attempt_id"),
+        })
+        if not existing_notif:
+            await sdb.insert_one("notifications", {
+                "id": str(uuid.uuid4()),
+                "user_id": uid,
+                "bill_id": result.get("collection_attempt_id"),
+                "type": "payment_requires_action",
+                "title": "Action needed to complete your payment",
+                "message": (
+                    f"Your {freq} contribution of ${amount:.2f} couldn't be completed "
+                    f"automatically — your card issuer needs you to verify this payment. "
+                    f"Please contact support or update your payment method."
+                ),
+                "read": False,
+                "email_sent": False,
+                "created_at": now.isoformat(),
+            })
+        logger.warning(
+            f"Scheduled collection for plan {plan['id']} (user {uid}) requires customer "
+            f"action (Stripe authentication_required) — schedule not advanced, ledger not credited"
+        )
+        return result  # do NOT advance the schedule — see comment above
+
     if result["status"] == "succeeded":
         # Card payments confirm synchronously. Same atomic idempotency
         # pattern as the Checkout/webhook paths: only credit the ledger if
@@ -2317,17 +2367,31 @@ async def _collect_for_plan(plan: dict, now: datetime) -> dict:
     return result
 
 
+async def _run_due_scheduled_collections() -> dict:
+    """One pass: runs _collect_for_plan() for every due, active plan. Shared
+    by the in-process loop below and the /internal/cron/scheduled-collections
+    endpoint, so there's exactly one place this runs from regardless of which
+    scheduling mode a deployment uses."""
+    now = datetime.now(timezone.utc)
+    today_str = now.strftime('%Y-%m-%d')
+    active_plans = await sdb.find_many("payment_plans", {"status": "active"})
+    attempted = 0
+    for plan in active_plans:
+        next_date_str = (plan.get("next_deduction_date") or "")[:10]
+        if next_date_str and next_date_str <= today_str:
+            await _collect_for_plan(plan, now)
+            attempted += 1
+    return {"active_plans": len(active_plans), "attempted": attempted}
+
+
 async def process_scheduled_collections():
-    """Background task: runs _collect_for_plan() for every due, active plan."""
+    """In-process background task (SCHEDULER_MODE=loop, the default): calls
+    _run_due_scheduled_collections() every 60 seconds for as long as this
+    process stays up. See SCHEDULER_MODE below for the cron-triggered
+    alternative that doesn't depend on a long-lived process."""
     while True:
         try:
-            now = datetime.now(timezone.utc)
-            today_str = now.strftime('%Y-%m-%d')
-            active_plans = await sdb.find_many("payment_plans", {"status": "active"})
-            for plan in active_plans:
-                next_date_str = (plan.get("next_deduction_date") or "")[:10]
-                if next_date_str and next_date_str <= today_str:
-                    await _collect_for_plan(plan, now)
+            await _run_due_scheduled_collections()
         except Exception as e:
             logger.error(f"Scheduled collection loop error: {e}")
 
@@ -2338,28 +2402,38 @@ async def process_scheduled_collections():
 PAYMENT_RUN_INTERVAL_SECONDS = 6 * 60 * 60  # every 6 hours — bills don't need per-minute polling
 
 
-async def payment_run_scheduler_loop():
-    """Periodically builds a fresh payment run from whatever bills are due
-    and can actually be afforded from cleared, available customer balances.
+async def _run_payment_run_scheduler_once() -> dict:
+    """One pass: builds a fresh payment run from whatever bills are due and
+    can actually be afforded from cleared, available customer balances.
     Does NOT approve or execute anything — that stays a human decision (see
-    POST /admin/payment-runs/{id}/approve). This just keeps the admin queue
-    populated automatically instead of requiring someone to remember to
-    click 'create run'."""
+    POST /admin/payment-runs/{id}/approve). Shared by the in-process loop
+    below and the /internal/cron/payment-run-queue endpoint."""
+    run = await payment_runs.build_payment_run(horizon_days=3, created_by=None)
+    if run["item_count"] > 0:
+        logger.info(f"Payment run {run['id']} built: {run['item_count']} bills, ${run['total_amount']} total — awaiting admin approval")
+    return run
+
+
+async def payment_run_scheduler_loop():
+    """In-process background task (SCHEDULER_MODE=loop, the default): calls
+    _run_payment_run_scheduler_once() every PAYMENT_RUN_INTERVAL_SECONDS.
+    This just keeps the admin queue populated automatically instead of
+    requiring someone to remember to click 'create run'."""
     while True:
         try:
-            run = await payment_runs.build_payment_run(horizon_days=3, created_by=None)
-            if run["item_count"] > 0:
-                logger.info(f"Payment run {run['id']} built: {run['item_count']} bills, ${run['total_amount']} total — awaiting admin approval")
+            await _run_payment_run_scheduler_once()
         except Exception as e:
             logger.error(f"Payment run scheduler error: {e}")
         await asyncio.sleep(PAYMENT_RUN_INTERVAL_SECONDS)
 
 
 async def reconciliation_loop():
-    """Hourly trust-account reconciliation. approve_payment_run() refuses to
-    approve while the most recent run here has an open exception, so this
-    loop being healthy is a precondition for bills actually getting paid,
-    not just a reporting nicety."""
+    """In-process background task (SCHEDULER_MODE=loop, the default): hourly
+    trust-account reconciliation. approve_payment_run() refuses to approve
+    while the most recent run here has an open exception, so this loop (or
+    its cron-triggered equivalent, /internal/cron/reconciliation) being
+    healthy is a precondition for bills actually getting paid, not just a
+    reporting nicety."""
     while True:
         try:
             result = await reconciliation.run_trust_reconciliation()
@@ -2368,6 +2442,63 @@ async def reconciliation_loop():
         except Exception as e:
             logger.error(f"Reconciliation loop error: {e}")
         await asyncio.sleep(3600)
+
+
+# ===================== SCHEDULING MODES =====================
+# Three ways to trigger process_scheduled_collections / payment_run_scheduler_loop /
+# reconciliation_loop's underlying work, chosen via SCHEDULER_MODE:
+#
+#   loop (default)  — the in-process `while True: asyncio.sleep()` loops
+#                      defined above. Zero extra config, but the schedule
+#                      lives only in this process's memory (restart loses
+#                      it) and assumes exactly one instance is ever running.
+#   apscheduler      — backend/scheduler.py: APScheduler with a persistent
+#                      Postgres job store (survives restarts) plus a
+#                      Postgres advisory lock around each job (safe if
+#                      multiple instances run at once). Requires
+#                      DATABASE_URL — see scheduler.py's docstring.
+#   cron             — the /internal/cron/* endpoints below: stateless,
+#                      idempotent HTTP calls an external cron system hits
+#                      on a schedule. Durability comes from the external
+#                      scheduler rather than this process surviving.
+#
+# Whichever mode is NOT active for these three jobs, _start_background_loops
+# (in startup_event) does not also start it — running two triggering
+# mechanisms for the same jobs at once would double-run them.
+#
+# The /internal/cron/* endpoints stay registered regardless of
+# SCHEDULER_MODE (harmless — CRON_SECRET still gates them), so they're
+# always available for a manual/ops-triggered run even in loop or
+# apscheduler mode.
+#
+# Auth on the cron endpoints is a shared secret rather than an admin JWT
+# because external cron systems generally can't hold a short-lived,
+# refreshable user session. Fails closed: if CRON_SECRET isn't set, these
+# endpoints refuse every request rather than running unauthenticated.
+SCHEDULER_MODE = os.environ.get('SCHEDULER_MODE', 'loop').lower()
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
+
+
+def _verify_cron_secret(x_cron_secret: str = Header(default="", alias="X-Cron-Secret")):
+    if not CRON_SECRET:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured — cron endpoints are disabled")
+    if not secrets.compare_digest(x_cron_secret, CRON_SECRET):
+        raise HTTPException(status_code=401, detail="Invalid cron secret")
+
+
+@api_router.post("/internal/cron/scheduled-collections")
+async def cron_scheduled_collections(_: None = Depends(_verify_cron_secret)):
+    return await _run_due_scheduled_collections()
+
+
+@api_router.post("/internal/cron/payment-run-queue")
+async def cron_payment_run_queue(_: None = Depends(_verify_cron_secret)):
+    return await _run_payment_run_scheduler_once()
+
+
+@api_router.post("/internal/cron/reconciliation")
+async def cron_reconciliation(_: None = Depends(_verify_cron_secret)):
+    return await reconciliation.run_trust_reconciliation()
 
 
 def _next_deduction_date(freq: str) -> datetime:
@@ -3207,9 +3338,26 @@ async def startup_event():
     await ledger.ensure_system_accounts()
 
     def _start_background_loops():
-        asyncio.create_task(process_scheduled_collections())
-        asyncio.create_task(payment_run_scheduler_loop())
-        asyncio.create_task(reconciliation_loop())
+        if SCHEDULER_MODE == 'cron':
+            logger.info(
+                "SCHEDULER_MODE=cron — scheduled-collections, payment-run-queue and "
+                "reconciliation are NOT started as in-process loops; an external cron "
+                "must call POST /api/internal/cron/{scheduled-collections,payment-run-queue,reconciliation} "
+                "with header X-Cron-Secret. generate_notifications still runs in-process."
+            )
+        elif SCHEDULER_MODE == 'apscheduler':
+            import scheduler as persistent_scheduler
+            persistent_scheduler.start()
+            logger.info(
+                "SCHEDULER_MODE=apscheduler — scheduled-collections, payment-run-queue and "
+                "reconciliation are NOT started as in-process loops; backend/scheduler.py's "
+                "persistent-job-store scheduler owns them instead. generate_notifications "
+                "still runs in-process."
+            )
+        else:
+            asyncio.create_task(process_scheduled_collections())
+            asyncio.create_task(payment_run_scheduler_loop())
+            asyncio.create_task(reconciliation_loop())
         asyncio.create_task(generate_notifications())
 
     # SECURITY FIX: this used to seed an admin account with a hardcoded
@@ -3221,7 +3369,7 @@ async def startup_event():
     # password. Skip and log clearly rather than falling back to a default.
     if os.environ.get('SEED_DEMO_DATA', 'false').lower() != 'true':
         _start_background_loops()
-        logger.info("SEED_DEMO_DATA not enabled — skipping demo account seeding. Scheduled-collection, payment-run, reconciliation and notification loops started.")
+        logger.info(f"SEED_DEMO_DATA not enabled — skipping demo account seeding. Scheduler mode: {SCHEDULER_MODE}.")
         return
 
     SEED_ADMIN_EMAIL = os.environ.get('SEED_ADMIN_EMAIL', '')
@@ -3240,7 +3388,7 @@ async def startup_event():
         await _seed_test_user(sb, SEED_TEST_EMAIL, SEED_TEST_PASSWORD)
 
     _start_background_loops()
-    logger.info("Scheduled-collection, payment-run, reconciliation and notification loops started")
+    logger.info(f"Scheduler mode: {SCHEDULER_MODE}.")
 
 
 async def _seed_admin_user(sb, SEED_ADMIN_EMAIL: str, SEED_ADMIN_PASSWORD: str):
@@ -3336,4 +3484,7 @@ async def _seed_test_user(sb, SEED_TEST_EMAIL: str, SEED_TEST_PASSWORD: str):
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    pass  # Supabase client handles its own cleanup
+    if SCHEDULER_MODE == 'apscheduler':
+        import scheduler as persistent_scheduler
+        persistent_scheduler.shutdown()
+    # Supabase client handles its own cleanup

@@ -210,12 +210,56 @@ async def collect_scheduled_contribution(user_id: str, amount, payment_plan_id: 
             },
             idempotency_key=idempotency_key,
         )
+        # An off-session confirm can, in principle, come back with this
+        # status directly rather than raising (see the CardError branch
+        # below for the path Stripe's documented behaviour actually takes
+        # for off_session=True — this is a defensive second path, not the
+        # primary one).
+        if pi.status == "requires_action":
+            await sdb.update_one("collection_attempts", {"id": attempt["id"]}, {"$set": {
+                "status": "requires_customer_action", "stripe_payment_intent_id": pi.id,
+            }})
+            return {
+                "status": "requires_customer_action",
+                "payment_intent_id": pi.id,
+                "collection_attempt_id": attempt["id"],
+                "reason": "authentication_required",
+            }
+
         await sdb.update_one("collection_attempts", {"id": attempt["id"]}, {"$set": {
             "status": pi.status, "stripe_payment_intent_id": pi.id,
         }})
         return {"status": pi.status, "payment_intent_id": pi.id, "collection_attempt_id": attempt["id"]}
 
     except stripe.error.CardError as e:
+        # This is the path Stripe's documented behaviour actually takes:
+        # for off_session=True + confirm=True, a card that needs further
+        # authentication (3D Secure etc.) does NOT come back as a normal
+        # "requires_action" status -- Stripe raises a CardError with
+        # code == "authentication_required" instead, specifically because
+        # off-session confirmation isn't expected to complete an
+        # interactive challenge. The PaymentIntent itself (now sitting in
+        # requires_action) is exposed on the exception so the customer can
+        # later come back on-session and confirm it themselves using its
+        # client_secret -- that on-session confirmation UI is a separate,
+        # not-yet-built piece of work; this only needs to record the state
+        # accurately and make sure it's visible rather than silently
+        # falling into "failed".
+        if getattr(e, "code", None) == "authentication_required":
+            pi_obj = getattr(e, "payment_intent", None) or (e.json_body or {}).get("error", {}).get("payment_intent")
+            pi_id = (pi_obj or {}).get("id") if isinstance(pi_obj, dict) else getattr(pi_obj, "id", None)
+            await sdb.update_one("collection_attempts", {"id": attempt["id"]}, {"$set": {
+                "status": "requires_customer_action",
+                "stripe_payment_intent_id": pi_id,
+                "error_message": str(e.user_message or e),
+            }})
+            return {
+                "status": "requires_customer_action",
+                "payment_intent_id": pi_id,
+                "collection_attempt_id": attempt["id"],
+                "reason": "authentication_required",
+            }
+
         await sdb.update_one("collection_attempts", {"id": attempt["id"]}, {"$set": {
             "status": "failed", "error_message": str(e.user_message or e),
         }})

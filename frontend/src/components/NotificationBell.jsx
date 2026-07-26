@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { axiosInstance, API } from '../App';
-import { Bell, X, AlertTriangle, Clock, Wallet, CheckCircle } from 'lucide-react';
+import { Bell, X, AlertTriangle, Clock, Wallet, CheckCircle, ShieldAlert } from 'lucide-react';
 
 const NotificationBell = () => {
   const [notifs, setNotifs] = useState([]);
@@ -48,6 +48,7 @@ const NotificationBell = () => {
     upcoming: <Clock size={14} className="text-amber-500" />,
     low_balance: <Wallet size={14} className="text-blue-500" />,
     auto_payment: <CheckCircle size={14} className="text-green-500" />,
+    payment_requires_action: <ShieldAlert size={14} className="text-amber-600" />,
   };
 
   return (
