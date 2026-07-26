@@ -212,6 +212,25 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_table ON audit_log(table_name);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 
 -- ============================================================
+-- PAYMENT TRANSACTIONS (Stripe checkout sessions)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payment_transactions (
+    id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::text,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL,
+    amount DOUBLE PRECISION NOT NULL DEFAULT 0,
+    package_id TEXT DEFAULT '',
+    payment_status TEXT DEFAULT 'initiated',
+    status TEXT DEFAULT 'pending',
+    payment_method_type TEXT DEFAULT 'card',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_user ON payment_transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_session ON payment_transactions(session_id);
+
+
+-- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
 

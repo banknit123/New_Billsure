@@ -1846,18 +1846,16 @@ async def create_checkout_session(data: TopUpRequest, request: Request, current_
             )
         raise HTTPException(status_code=500, detail=f"Checkout creation failed: {error_msg}")
 
-    # Create payment transaction record
+    # Create payment transaction record (only columns that exist in Supabase table)
     tx = {
         "id": str(uuid.uuid4()),
         "session_id": session.session_id,
         "user_id": current_user["id"],
         "amount": amount,
-        "currency": "aud",
         "package_id": data.package_id,
-        "type": "wallet_topup",
         "payment_status": "initiated",
         "status": "pending",
-        "metadata": metadata,
+        "payment_method_type": data.payment_method_type,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await sdb.insert_one("payment_transactions", tx)
@@ -1892,7 +1890,7 @@ async def check_payment_status(session_id: str, current_user: dict = Depends(get
             await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
             await sdb.update_one("payment_transactions",
                 {"session_id": session_id},
-                {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
+                {"$set": {"payment_status": "paid", "status": "completed"}}
             )
             # Record in main transactions collection
             tx_record = Transaction(
@@ -1943,7 +1941,7 @@ async def stripe_webhook(request: Request):
                 await sdb.update_one("users", {"id": tx["user_id"]}, {"$inc": {"wallet_balance": amount}})
                 await sdb.update_one("payment_transactions",
                     {"session_id": event.session_id},
-                    {"$set": {"payment_status": "paid", "status": "completed", "paid_at": datetime.now(timezone.utc).isoformat()}}
+                    {"$set": {"payment_status": "paid", "status": "completed"}}
                 )
                 await sdb.update_one("payment_plans", {"user_id": tx["user_id"], "status": "active"}, {"$inc": {"total_collected": amount}})
 
