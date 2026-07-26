@@ -2029,18 +2029,16 @@ async def create_checkout_session(data: TopUpRequest, request: Request, current_
         logger.error(f"Stripe checkout creation failed: {error_msg}")
         raise HTTPException(status_code=500, detail="Checkout creation failed. Please try again later.")
 
-    # Create payment transaction record
+    # Create payment transaction record (only columns that exist in Supabase table)
     tx = {
         "id": str(uuid.uuid4()),
         "session_id": session.session_id,
         "user_id": current_user["id"],
         "amount": amount,
-        "currency": "aud",
         "package_id": data.package_id,
-        "type": "wallet_topup",
         "payment_status": "initiated",
         "status": "pending",
-        "metadata": metadata,
+        "payment_method_type": data.payment_method_type,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await sdb.insert_one("payment_transactions", tx)
