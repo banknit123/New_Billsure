@@ -370,13 +370,18 @@ DROP POLICY IF EXISTS audit_service ON audit_log;
 -- only — these must never be callable via the public anon/authenticated
 -- Supabase RPC surface.
 
+-- Applied live via migration 010 (2026-07-26) -- these were defined here
+-- but never actually existed on the live database until then (see
+-- CLAUDE.md for how that was found). search_path pinned via migration
+-- 011, same hardening as check_journal_balanced() (migration 004).
+
 CREATE OR REPLACE FUNCTION increment_wallet_balance(p_user_id TEXT, p_amount DOUBLE PRECISION)
 RETURNS DOUBLE PRECISION AS $$
     UPDATE users
     SET wallet_balance = COALESCE(wallet_balance, 0) + p_amount
     WHERE id = p_user_id
     RETURNING wallet_balance;
-$$ LANGUAGE sql;
+$$ LANGUAGE sql SET search_path = public, pg_temp;
 
 CREATE OR REPLACE FUNCTION increment_active_plan_totals(
     p_user_id TEXT,
@@ -388,7 +393,7 @@ RETURNS VOID AS $$
     SET total_collected = COALESCE(total_collected, 0) + p_collected_delta,
         total_paid_out = COALESCE(total_paid_out, 0) + p_paid_out_delta
     WHERE user_id = p_user_id AND status = 'active';
-$$ LANGUAGE sql;
+$$ LANGUAGE sql SET search_path = public, pg_temp;
 
 REVOKE ALL ON FUNCTION increment_wallet_balance(TEXT, DOUBLE PRECISION) FROM PUBLIC;
 REVOKE ALL ON FUNCTION increment_active_plan_totals(TEXT, DOUBLE PRECISION, DOUBLE PRECISION) FROM PUBLIC;

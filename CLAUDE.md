@@ -481,9 +481,24 @@ in-browser click-through unreliable this session.
    for a maintenance window**: it invalidates every existing session the
    moment it deploys. Needs the Supabase project's JWT secret (Dashboard
    → Project Settings → API → JWT Settings) when ready to proceed.
-4. `SCHEDULER_MODE=apscheduler` — built, not yet switched on; needs
-   `DATABASE_URL` (a direct Postgres connection string) when you want
-   restart-survival/multi-instance safety for the three scheduled jobs.
+4. **Done:** `SCHEDULER_MODE=apscheduler` switched on locally (2026-07-26)
+   — `DATABASE_URL` provided (Session pooler connection string, database
+   password URL-encoded since it contains `@`). Verified for real: direct
+   `psycopg2` connection + `pg_try_advisory_lock`/`pg_advisory_unlock`
+   both work against the live project; backend startup log showed all
+   three jobs (`_job_scheduled_collections`, `_job_payment_run_queue`,
+   `_job_reconciliation`) added successfully with no errors; confirmed
+   the `apscheduler_jobs` table exists live with all three jobs
+   persisted (real `next_run_time` values, not just in-process state).
+   `apscheduler_jobs` got RLS auto-enabled with no policies by Supabase's
+   own `rls_auto_enable()` (applies to every new table automatically) —
+   already safely default-deny, no action needed. Also found and fixed:
+   applying migration 010 (below) surfaced a `function_search_path_mutable`
+   warning on both new functions — pinned via migration 011, same
+   hardening as `check_journal_balanced()` (migration 004). Not yet
+   tested: an actual second instance running concurrently (the scenario
+   the advisory lock specifically exists for) — only single-instance
+   behavior verified so far.
 5. Lower priority: evaluate a virtual-account payments provider (Zepto,
    Monoova, or Zai were discussed) to replace the still-manual BPAY
    disbursement step with a real API and a live external-balance feed for
