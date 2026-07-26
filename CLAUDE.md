@@ -269,7 +269,32 @@ double-run them. The `/internal/cron/*` endpoints stay registered in
 every mode (still gated by `CRON_SECRET`) for manual/ops-triggered runs.
 `reconciliation.py` also emails `OPS_ALERT_EMAIL` (if set) the moment a
 `reconciliation_exceptions` row is created, instead of that row just
-sitting silently in a table.
+sitting silently in a table. See `ALERTING.md` for the reconciliation
+alert channels specifically (email + webhook, both pluggable).
+
+## Off-session charges requiring extra card authentication
+
+`stripe_collections.collect_scheduled_contribution()` now handles the
+case Stripe's own documented behaviour actually produces for
+`off_session=True` + `confirm=True`: a card needing 3D Secure / SCA
+authentication doesn't come back with a normal `requires_action` status —
+Stripe raises a `CardError` with `code == "authentication_required"`
+instead, carrying the stuck `PaymentIntent` on the exception. This used
+to fall through unhandled in `_collect_for_plan` (server.py) — the
+schedule would silently advance past it with no record and no
+notification. Now: `collection_attempts` and `payment_plans.last_collection_status`
+are both marked `requires_customer_action` (not `failed` — this isn't a
+decline, it's an unfinished authentication step), the ledger is not
+credited, the schedule does NOT advance (so it keeps flagging as stuck
+each cycle rather than silently skipping the contribution), a
+customer-facing notification is created (`type: payment_requires_action`),
+and `GET /admin/customer-analytics` now returns `needs_attention: true`
+for affected customers. What's still missing: an actual on-session flow
+for the customer to complete the 3D Secure challenge (would need Stripe.js
+calling `confirmCardPayment` with the stuck PaymentIntent's client_secret)
+— out of scope for this pass, which only needed to stop the state from
+being silently dropped. Logic-tested against a mock Stripe SDK (not a
+real Stripe test-mode account) in `test_stripe_collections.py`.
 
 ## Admin UI
 

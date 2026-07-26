@@ -90,8 +90,11 @@ class FakeObj(dict):
 
 
 class FakeCardError(Exception):
-    def __init__(self, user_message):
+    def __init__(self, user_message, code=None, payment_intent=None):
         self.user_message = user_message
+        self.code = code
+        self.payment_intent = payment_intent
+        self.json_body = {"error": {"payment_intent": payment_intent}} if payment_intent else {}
         super().__init__(user_message)
 
 
@@ -105,6 +108,7 @@ class MockStripeState:
         self.next_payment_intent_status = "succeeded"
         self.raise_card_error = False
         self.raise_generic_error = False
+        self.raise_authentication_required = False
         self.payment_intent_calls = []
 
 
@@ -146,6 +150,18 @@ class _PaymentIntent:
     @staticmethod
     def create(**kwargs):
         state.payment_intent_calls.append(kwargs)
+        if state.raise_authentication_required:
+            # Mirrors real Stripe: for off_session=True + confirm=True, a
+            # card needing 3D Secure / SCA raises a CardError with
+            # code=="authentication_required" rather than returning a
+            # normal "requires_action" status -- the PaymentIntent itself
+            # (now sitting in requires_action) is exposed on the exception.
+            pi_id = "pi_" + str(uuid.uuid4())[:8]
+            raise FakeCardError(
+                "This payment requires additional authentication.",
+                code="authentication_required",
+                payment_intent={"id": pi_id, "status": "requires_action"},
+            )
         if state.raise_card_error:
             raise FakeCardError("Your card was declined.")
         if state.raise_generic_error:
@@ -236,6 +252,18 @@ async def main():
     result = await sc.collect_scheduled_contribution(user["id"], "10.00", "plan-alice", "plan-alice:2026-09-25")
     assert result["status"] == "processing"
     print("[ok] async payment method (e.g. BECS) correctly reported as 'processing', not 'succeeded'")
+
+    # --- Phase 3: off-session charge requiring extra card authentication ---
+    state.raise_authentication_required = True
+    result = await sc.collect_scheduled_contribution(user["id"], "15.00", "plan-alice", "plan-alice:2026-10-25")
+    assert result["status"] == "requires_customer_action", f"expected requires_customer_action, got {result}"
+    assert result["payment_intent_id"] and result["payment_intent_id"].startswith("pi_")
+    attempt_row = await find_one("collection_attempts", {"id": result["collection_attempt_id"]})
+    assert attempt_row["status"] == "requires_customer_action", \
+        f"collection_attempts row must be marked requires_customer_action, got {attempt_row['status']}"
+    print(f"[ok] off-session charge needing extra authentication correctly surfaced as 'requires_customer_action' "
+          f"(not silently dropped or marked 'failed'): {result['payment_intent_id']}")
+    state.raise_authentication_required = False
 
     print("\nALL CHECKS PASSED")
 

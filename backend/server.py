@@ -1923,6 +1923,14 @@ async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
         elif total_pending > u.get("wallet_balance", 0):
             risk = "medium"
 
+        # Surfaces plans stuck needing the customer to complete extra card
+        # authentication (Stripe returned "requires_action" on an
+        # off-session charge -- see _collect_for_plan in this file). The
+        # ledger is never credited for these, and the schedule doesn't
+        # advance, so without this an admin has no way to notice a
+        # customer's contribution is silently stuck.
+        last_status = plan.get("last_collection_status") if plan else None
+
         analytics.append({
             "user_id": uid,
             "name": u.get("full_name", ""),
@@ -1936,6 +1944,8 @@ async def admin_customer_analytics(admin_user: dict = Depends(get_admin_user)):
             "has_plan": plan is not None and plan.get("status") == "active",
             "plan_frequency": plan.get("frequency") if plan else None,
             "risk_level": risk,
+            "last_collection_status": last_status,
+            "needs_attention": last_status == "requires_customer_action",
         })
     return {"customers": analytics, "total": len(analytics)}
 
@@ -2271,6 +2281,45 @@ async def _collect_for_plan(plan: dict, now: datetime) -> dict:
     if result["status"] == "no_payment_method":
         logger.warning(f"Plan {plan['id']} (user {uid}) has no chargeable payment method — leaving next_deduction_date unchanged so it retries once one is added")
         return result  # do NOT advance the schedule — nothing was attempted
+
+    if result["status"] == "requires_customer_action":
+        # Off-session confirmation hit Stripe's authentication_required path
+        # (see stripe_collections.collect_scheduled_contribution) — the card
+        # needs an interactive 3D Secure / SCA challenge this backend can't
+        # complete on the customer's behalf. Do NOT credit the ledger (no
+        # branch below does), and do NOT advance next_deduction_date — the
+        # collection_attempts row is idempotency-keyed to this cycle, so
+        # leaving the schedule where it is means every subsequent tick keeps
+        # reporting the same stuck state (visible via last_collection_status
+        # below) rather than silently moving on and permanently skipping
+        # this contribution. Surfaced two ways: a customer-facing
+        # notification here, and admin visibility via needs_attention in
+        # GET /admin/customer-analytics.
+        existing_notif = await sdb.find_one("notifications", {
+            "user_id": uid, "type": "payment_requires_action",
+            "bill_id": result.get("collection_attempt_id"),
+        })
+        if not existing_notif:
+            await sdb.insert_one("notifications", {
+                "id": str(uuid.uuid4()),
+                "user_id": uid,
+                "bill_id": result.get("collection_attempt_id"),
+                "type": "payment_requires_action",
+                "title": "Action needed to complete your payment",
+                "message": (
+                    f"Your {freq} contribution of ${amount:.2f} couldn't be completed "
+                    f"automatically — your card issuer needs you to verify this payment. "
+                    f"Please contact support or update your payment method."
+                ),
+                "read": False,
+                "email_sent": False,
+                "created_at": now.isoformat(),
+            })
+        logger.warning(
+            f"Scheduled collection for plan {plan['id']} (user {uid}) requires customer "
+            f"action (Stripe authentication_required) — schedule not advanced, ledger not credited"
+        )
+        return result  # do NOT advance the schedule — see comment above
 
     if result["status"] == "succeeded":
         # Card payments confirm synchronously. Same atomic idempotency
