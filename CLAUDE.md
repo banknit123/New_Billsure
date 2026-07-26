@@ -154,6 +154,18 @@ manual step, see Deployment below):
   comment for what a real future anon-key-scoped policy would need to key
   off (this app's JWT is custom — `utils/auth.py`'s `user_id` claim — not
   native Supabase `auth.uid()`).
+  **`backend/migrations/008_rls_policies_draft_not_applied.sql`** is the
+  next step beyond default-deny -- draft, granular, read-your-own-row
+  SELECT policies for the same tables, keyed to this app's custom JWT via
+  a `current_setting('app.current_user_id', true)` session variable.
+  **Not applied anywhere, and not safe to apply as-is** — it depends on
+  session-variable wiring (a raw Postgres connection setting
+  `app.current_user_id` per request) that doesn't exist in this codebase
+  yet; until that's built, applying it is a no-op (fails safe as
+  default-deny, same as 007, per NULL-never-equals-anything). Needs
+  security review before it's anything more than a documented starting
+  point — see the file's own header for the full reasoning, including why
+  write policies are deliberately left out entirely.
 - **Schema gap — FIXED (migration 006, applied live):** `models/schemas.py`'s
   `DirectDebitRequest` expects `signature`, `authorization_date`,
   `terms_accepted`, `max_payment_amount`, `provider`, `provider_type`,
