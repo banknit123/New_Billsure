@@ -280,10 +280,8 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
     payment_method_type TEXT DEFAULT 'card',
     created_at TIMESTAMPTZ DEFAULT now(),
     stripe_payment_intent TEXT,
-    -- NOT YET on the live table as of this writing (2026-07-26) --
-    -- check_payment_status()/stripe_webhook() in server.py both write
-    -- this column on the "paid" transition; confirm via information_schema
-    -- before relying on it, and add via an additive migration if missing.
+    -- Added via migration 009 -- was missing when check_payment_status()/
+    -- stripe_webhook() in server.py were first found writing to it.
     paid_at TIMESTAMPTZ
 );
 

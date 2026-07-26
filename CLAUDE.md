@@ -166,6 +166,12 @@ manual step, see Deployment below):
   security review before it's anything more than a documented starting
   point — see the file's own header for the full reasoning, including why
   write policies are deliberately left out entirely.
+- **`backend/migrations/009_payment_transactions_paid_at.sql` — FIXED, applied live:**
+  found while hotfixing a broken `main` (see git history) —
+  `check_payment_status()`/`stripe_webhook()` both write `paid_at` on the
+  "paid" transition, but the live `payment_transactions` table didn't
+  have that column. Purely additive; confirmed live via
+  `information_schema.columns` after applying.
 - **Schema gap — FIXED (migration 006, applied live):** `models/schemas.py`'s
   `DirectDebitRequest` expects `signature`, `authorization_date`,
   `terms_accepted`, `max_payment_amount`, `provider`, `provider_type`,
