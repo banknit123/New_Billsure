@@ -323,22 +323,40 @@ original integration notes.
 
 ## Payment-method tokenization frontend
 
-`frontend/src/components/StripeCardSetup.jsx` is the browser half of real
-Stripe payment-method tokenization: calls
-`POST /payment-methods/setup-intent`, renders Stripe's `<CardElement>`
-(card number never reaches BillSure's servers), confirms client-side via
-`stripe.confirmCardSetup()`, then calls
-`POST /payment-methods/confirm-setup`. Wired into
-`PaymentMethodsManager.jsx` as "Add Card (Secure)"; the original raw-entry
-form is still there as "Add Bank Account" (relabeled) for
-reference/manual-BPAY-style entries that were never going to be chargeable
-anyway (no `stripe_payment_method_id`) — the UI now shows an "Auto-pay
-ready" vs "Manual only" badge per method so this distinction is visible.
+`frontend/src/components/StripePaymentMethodSetup.jsx` (superseded the
+earlier card-only `StripeCardSetup.jsx`, since removed) is the browser
+half of real Stripe payment-method tokenization, covering **both** card
+and AU BECS Direct Debit — matching what `stripe_collections.create_setup_intent()`
+already accepts on the backend (`payment_method_types=["card", "au_becs_debit"]`).
+Flow: calls `POST /payment-methods/setup-intent` to get a `client_secret`
+*before* rendering `<Elements>` (the Payment Element needs the
+client_secret up front, unlike the old card-only `<CardElement>`), renders
+Stripe's `<PaymentElement>` (card/BECS details never reach BillSure's
+servers), confirms client-side via `stripe.confirmSetup({elements,
+redirect: 'if_required', ...})`, then calls `POST /payment-methods/confirm-setup`.
+
+**The old raw-entry form (typed card/BSB/account numbers going straight
+into our own database) has been removed entirely** — both call sites
+(`PaymentMethodsManager.jsx`'s "Add Payment Method" dialog, and
+`BillSetupWizard.jsx`'s onboarding step 4) now use
+`StripePaymentMethodSetup` exclusively. `PaymentMethodsManager.jsx` still
+shows an "Auto-pay ready" vs "Manual only (legacy)" badge per method, for
+any pre-existing rows from before this change that still lack a
+`stripe_payment_method_id`. The backend's `POST /payment-methods` raw-entry
+endpoint itself was left in place (out of scope for a frontend-only pass —
+removing a backend endpoint is a separate decision), but nothing in the
+frontend calls it anymore.
+
 Needs `REACT_APP_STRIPE_PUBLISHABLE_KEY` set or the dialog shows a
-not-configured message instead of the card form (fails closed, not
+not-configured message instead of the payment form (fails closed, not
 silently broken). `@stripe/stripe-js` and `@stripe/react-stripe-js` were
 added to `frontend/package.json`; `yarn install` has been run and
-`yarn.lock` is checked in.
+`yarn.lock` is checked in. Verified the dev server compiles and serves
+this cleanly via direct `curl` checks; the in-session Browser pane tool
+itself had a proxying/caching issue serving `bundle.js` (confirmed to be
+the tool, not the app — `curl http://localhost:3000/static/js/bundle.js`
+returned a healthy 200 with real content throughout) that made an
+in-browser click-through unreliable this session.
 
 ## Deployment — not yet done
 

@@ -2,21 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { axiosInstance, API } from '../App';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { CreditCard, Building2, Plus, Trash2, Star, Loader2, ShieldCheck } from 'lucide-react';
-import StripeCardSetup from './StripeCardSetup';
+import { CreditCard, Building2, Plus, Trash2, Star } from 'lucide-react';
+import StripePaymentMethodSetup from './StripePaymentMethodSetup';
 
 const PaymentMethodsManager = ({ user, refreshUser }) => {
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [showStripeAdd, setShowStripeAdd] = useState(false);
-  const [form, setForm] = useState({ type: 'bank_account', label: '', bank_name: '', bsb: '', account_number: '', card_number: '', card_brand: '', is_primary: false });
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => { fetch(); }, []);
 
@@ -25,20 +19,6 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
       const res = await axiosInstance.get(`${API}/payment-methods`);
       setMethods(res.data);
     } catch(err) { console.error(err.message); } finally { setLoading(false); }
-  };
-
-  const add = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await axiosInstance.post(`${API}/payment-methods`, form);
-      toast.success('Payment method added');
-      setShowAdd(false);
-      resetForm();
-      fetch();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed');
-    } finally { setSaving(false); }
   };
 
   const remove = async (id) => {
@@ -57,8 +37,6 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
     } catch { toast.error('Failed'); }
   };
 
-  const resetForm = () => setForm({ type: 'bank_account', label: '', bank_name: '', bsb: '', account_number: '', card_number: '', card_brand: '', is_primary: false });
-
   return (
     <div className="space-y-6" data-testid="payment-methods-page">
       <div className="flex items-center justify-between">
@@ -66,16 +44,11 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit, sans-serif' }}>
             Payment Methods
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Manage your bank accounts and cards for automatic deductions</p>
+          <p className="text-sm text-slate-500 mt-1">Manage your cards and bank accounts for automatic deductions</p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setShowStripeAdd(true)} className="bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-card-stripe-btn">
-            <ShieldCheck size={16} className="mr-1" /> Add Card (Secure)
-          </Button>
-          <Button variant="outline" onClick={() => setShowAdd(true)} className="border-slate-300 text-sm" data-testid="add-payment-method-btn">
-            <Plus size={16} className="mr-1" /> Add Bank Account
-          </Button>
-        </div>
+        <Button onClick={() => setShowAdd(true)} className="bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-payment-method-btn">
+          <Plus size={16} className="mr-1" /> Add Payment Method
+        </Button>
       </div>
 
       {loading ? (
@@ -87,9 +60,9 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
           <CardContent className="p-12 text-center">
             <CreditCard className="mx-auto text-slate-300 mb-3" size={40} />
             <p className="text-slate-500 text-sm">No payment methods added</p>
-            <p className="text-xs text-slate-400 mt-1">Add a card to enable automatic deductions, or a bank account for reference</p>
-            <Button onClick={() => setShowStripeAdd(true)} className="mt-4 bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-first-method-btn">
-              <ShieldCheck size={16} className="mr-1" /> Add Card (Secure)
+            <p className="text-xs text-slate-400 mt-1">Add a card or bank account to enable automatic deductions</p>
+            <Button onClick={() => setShowAdd(true)} className="mt-4 bg-slate-900 hover:bg-slate-800 text-sm" data-testid="add-first-method-btn">
+              <Plus size={16} className="mr-1" /> Add Payment Method
             </Button>
           </CardContent>
         </Card>
@@ -101,9 +74,9 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                    m.type === 'bank_account' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'
+                    m.type === 'card' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'
                   }`}>
-                    {m.type === 'bank_account' ? <Building2 size={20} /> : <CreditCard size={20} />}
+                    {m.type === 'card' ? <CreditCard size={20} /> : <Building2 size={20} />}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -114,12 +87,13 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
                       {m.stripe_payment_method_id ? (
                         <span className="text-xs bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-medium" data-testid={`autopay-ready-${m.id}`}>Auto-pay ready</span>
                       ) : (
-                        <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium" data-testid={`manual-only-${m.id}`}>Manual only</span>
+                        <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-medium" data-testid={`manual-only-${m.id}`}>Manual only (legacy)</span>
                       )}
                     </div>
                     <p className="text-xs text-slate-500">
-                      {m.type === 'bank_account' ? `BSB: ${m.bsb || '—'} | Acc: ${m.account_number_masked || '—'}` :
-                       `${m.card_brand || 'Card'} ending ${m.card_last4 || '****'}`}
+                      {m.type === 'card' ? `${m.card_brand || 'Card'} ending ${m.card_last4 || '****'}` :
+                       m.type === 'au_becs_debit' ? `${m.bank_name || 'Bank'} ending ${m.account_number_masked?.slice(-4) || '****'}` :
+                       `BSB: ${m.bsb || '—'} | Acc: ${m.account_number_masked || '—'}`}
                     </p>
                   </div>
                 </div>
@@ -141,104 +115,18 @@ const PaymentMethodsManager = ({ user, refreshUser }) => {
         </div>
       )}
 
-      {/* Add Card via Stripe (tokenized, usable for automatic deductions) */}
-      <Dialog open={showStripeAdd} onOpenChange={setShowStripeAdd}>
-        <DialogContent className="max-w-md" data-testid="add-card-stripe-dialog">
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Card</DialogTitle>
-          </DialogHeader>
-          <StripeCardSetup
-            onSaved={() => { setShowStripeAdd(false); fetch(); }}
-            onCancel={() => setShowStripeAdd(false)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Bank Account (reference only -- not chargeable automatically;
-          see stripe_payment_method_id comment in models/schemas.py) */}
-      <Dialog open={showAdd} onOpenChange={v => { setShowAdd(v); if (!v) resetForm(); }}>
+      {/* Add Payment Method -- Stripe tokenization only (card or AU BECS
+          Direct Debit). Card/account details are entered directly into
+          Stripe's own UI component and never reach this app's servers. */}
+      <Dialog open={showAdd} onOpenChange={setShowAdd}>
         <DialogContent className="max-w-md" data-testid="add-payment-method-dialog">
           <DialogHeader>
-            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Bank Account</DialogTitle>
+            <DialogTitle style={{ fontFamily: 'Outfit, sans-serif' }}>Add Payment Method</DialogTitle>
           </DialogHeader>
-          <p className="text-xs text-slate-500 -mt-2">For reference only — automatic deductions require a card added via "Add Card (Secure)".</p>
-          <form onSubmit={add} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-slate-600">Type</Label>
-              <Select value={form.type} onValueChange={v => setForm({ ...form, type: v })}>
-                <SelectTrigger data-testid="method-type-select"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bank_account">Bank Account</SelectItem>
-                  <SelectItem value="credit_card">Credit Card</SelectItem>
-                  <SelectItem value="debit_card">Debit Card</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-slate-600">Label</Label>
-              <Input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })}
-                placeholder="e.g., Commonwealth Savings" required data-testid="method-label-input"
-                className="border-slate-200" />
-            </div>
-
-            {form.type === 'bank_account' ? (
-              <>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-600">Bank Name</Label>
-                  <Input value={form.bank_name} onChange={e => setForm({ ...form, bank_name: e.target.value })}
-                    placeholder="Commonwealth Bank" data-testid="method-bank-name-input" className="border-slate-200" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-slate-600">BSB</Label>
-                    <Input value={form.bsb} onChange={e => setForm({ ...form, bsb: e.target.value })}
-                      placeholder="062-000" data-testid="method-bsb-input" className="border-slate-200" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-medium text-slate-600">Account Number</Label>
-                    <Input value={form.account_number} onChange={e => setForm({ ...form, account_number: e.target.value })}
-                      placeholder="12345678" data-testid="method-account-input" className="border-slate-200" />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-600">Card Number</Label>
-                  <Input value={form.card_number} onChange={e => setForm({ ...form, card_number: e.target.value })}
-                    placeholder="4242 4242 4242 4242" data-testid="method-card-number-input" className="border-slate-200" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-medium text-slate-600">Card Brand</Label>
-                  <Select value={form.card_brand} onValueChange={v => setForm({ ...form, card_brand: v })}>
-                    <SelectTrigger data-testid="method-card-brand-select"><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Visa">Visa</SelectItem>
-                      <SelectItem value="Mastercard">Mastercard</SelectItem>
-                      <SelectItem value="Amex">Amex</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
-            )}
-
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="primary" checked={form.is_primary}
-                onChange={e => setForm({ ...form, is_primary: e.target.checked })}
-                className="rounded border-slate-300" data-testid="method-primary-checkbox" />
-              <Label htmlFor="primary" className="text-xs text-slate-600 cursor-pointer">Set as primary payment method</Label>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <Button type="submit" disabled={saving} className="flex-1 bg-slate-900 hover:bg-slate-800 text-sm" data-testid="save-method-btn">
-                {saving ? <Loader2 className="animate-spin mr-1" size={14} /> : null}
-                {saving ? 'Adding...' : 'Add Method'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setShowAdd(false)} className="border-slate-300">
-                Cancel
-              </Button>
-            </div>
-          </form>
+          <StripePaymentMethodSetup
+            onSaved={() => { setShowAdd(false); fetch(); }}
+            onCancel={() => setShowAdd(false)}
+          />
         </DialogContent>
       </Dialog>
     </div>

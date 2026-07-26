@@ -13,6 +13,7 @@ import {
   Upload, FileText, Loader2, CheckCircle2, ArrowRight, ArrowLeft,
   ScanLine, Calendar, DollarSign, CreditCard, Building2, Shield, Check
 } from 'lucide-react';
+import StripePaymentMethodSetup from './StripePaymentMethodSetup';
 
 const CATEGORIES = ['Electricity','Water','Gas','Internet','Mobile','Council','Insurance','Other'];
 
@@ -50,8 +51,6 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
   const [methods, setMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
   const [showAddMethod, setShowAddMethod] = useState(false);
-  const [methodForm, setMethodForm] = useState({ type: 'bank_account', label: '', bank_name: '', bsb: '', account_number: '', is_primary: true });
-  const [savingMethod, setSavingMethod] = useState(false);
 
   // ===== Step 1: Upload & Extract =====
   const handleFileChange = (e) => {
@@ -156,19 +155,6 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
   }, []);
 
   useEffect(() => { if (step === 3) fetchMethods(); }, [step, fetchMethods]);
-
-  const saveMethod = async (e) => {
-    e.preventDefault();
-    setSavingMethod(true);
-    try {
-      await axiosInstance.post(`${API}/payment-methods`, methodForm);
-      toast.success('Payment method saved!');
-      setShowAddMethod(false);
-      fetchMethods();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'Failed to save');
-    } finally { setSavingMethod(false); }
-  };
 
   const finishSetup = () => {
     toast.success('Setup complete! Your bills are now managed automatically.');
@@ -395,57 +381,16 @@ const BillSetupWizard = ({ user, refreshUser, onComplete }) => {
                 </div>
               </div>
             ) : (
-              <form onSubmit={saveMethod} className="space-y-4" data-testid="add-method-form">
-                <div>
-                  <Label className="text-xs text-slate-500">Type</Label>
-                  <Select value={methodForm.type} onValueChange={v => setMethodForm({...methodForm, type: v})}>
-                    <SelectTrigger className="h-10 mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bank_account">Bank Account</SelectItem>
-                      <SelectItem value="debit_card">Debit Card</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs text-slate-500">Label</Label>
-                  <Input value={methodForm.label} onChange={e => setMethodForm({...methodForm, label: e.target.value})}
-                    className="h-10 mt-1" placeholder="e.g. CBA Everyday" required data-testid="method-label" />
-                </div>
-                {methodForm.type === 'bank_account' && (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label className="text-xs text-slate-500">BSB</Label>
-                        <Input value={methodForm.bsb} onChange={e => setMethodForm({...methodForm, bsb: e.target.value})}
-                          className="h-10 mt-1" placeholder="000-000" required data-testid="method-bsb" />
-                      </div>
-                      <div>
-                        <Label className="text-xs text-slate-500">Account Number</Label>
-                        <Input value={methodForm.account_number} onChange={e => setMethodForm({...methodForm, account_number: e.target.value})}
-                          className="h-10 mt-1" placeholder="12345678" required data-testid="method-account" />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-slate-500">Bank Name</Label>
-                      <Input value={methodForm.bank_name} onChange={e => setMethodForm({...methodForm, bank_name: e.target.value})}
-                        className="h-10 mt-1" placeholder="e.g. Commonwealth Bank" data-testid="method-bank-name" />
-                    </div>
-                  </>
-                )}
-                <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 p-3 rounded-lg">
+              <div data-testid="add-method-form">
+                <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-50 p-3 rounded-lg mb-4">
                   <Shield size={14} className="text-teal flex-shrink-0" />
-                  Your details are encrypted with AES-128 and never stored in plain text.
+                  Your card or bank details are entered directly into Stripe's secure form and never reach BillSure's servers.
                 </div>
-                <div className="flex gap-3">
-                  {methods.length > 0 && (
-                    <Button type="button" variant="outline" onClick={() => setShowAddMethod(false)} className="border-slate-200">Cancel</Button>
-                  )}
-                  <Button type="submit" disabled={savingMethod} className="flex-1 bg-teal text-white hover:bg-teal-600" data-testid="save-method-btn">
-                    {savingMethod ? <Loader2 className="animate-spin mr-2" size={14} /> : null}
-                    Save & Complete Setup
-                  </Button>
-                </div>
-              </form>
+                <StripePaymentMethodSetup
+                  onSaved={() => { setShowAddMethod(false); fetchMethods(); }}
+                  onCancel={methods.length > 0 ? () => setShowAddMethod(false) : undefined}
+                />
+              </div>
             )}
 
             <button onClick={() => setStep(2)} className="mt-4 text-xs text-slate-400 hover:text-teal transition-colors">
