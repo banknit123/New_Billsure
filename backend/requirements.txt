@@ -19,7 +19,13 @@ distro==1.9.0
 dnspython==2.8.0
 ecdsa==0.19.2
 email-validator==2.3.0
-emergentintegrations==0.1.1
+# emergentintegrations was removed from PyPI entirely (Emergent's own
+# private package) -- it cannot be installed on any platform anymore,
+# which blocked running this backend outside Emergent's own
+# infrastructure. server.py's two call sites are now satisfied by
+# backend/emergentintegrations/ (a local compatibility shim, not a pip
+# package) -- see that directory's docstrings for what is and isn't
+# reimplemented.
 fastapi==0.138.2
 fastuuid==0.14.0
 filelock==3.29.4

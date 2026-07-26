@@ -195,6 +195,35 @@ Both should print `ALL CHECKS PASSED`. Run after any change to
 already caught a sign-convention bug and a fund-holds default-value bug
 during development).
 
+## Running the full backend locally
+
+`server.py` imports `emergentintegrations` (Emergent's own LLM/payments
+wrapper) directly — that package has been **removed from PyPI entirely**
+and can't be installed on any platform anymore, which used to make it
+impossible to even start the server outside Emergent's own infrastructure.
+`backend/emergentintegrations/` is a local compatibility shim (not a pip
+package — just a same-named directory Python resolves before looking at
+site-packages) that makes the import succeed:
+
+- `payments/stripe/checkout.py` is a **real** reimplementation against the
+  standard `stripe` SDK — wallet top-up (Checkout Sessions) works exactly
+  as before, nothing is faked.
+- `llm/chat.py` is a stub — both call sites (AI bill-photo scanning, AI
+  spending insights) already check `if EMERGENT_LLM_KEY:` before touching
+  it, and that env var is unset by default, so the stub is never actually
+  invoked unless someone sets `EMERGENT_LLM_KEY` without also wiring a
+  real provider into `LlmChat.send_message()`.
+
+To run the backend locally: create a venv in `backend/`, install
+`requirements.txt` (the `emergentintegrations==0.1.1` line has been
+removed — it was never installable), and set `SUPABASE_URL` /
+`SUPABASE_SERVICE_KEY` for the real EasyBillsPay project (there is no
+separate local database — local testing writes real rows to the live
+project, same as existing test fixtures already there) plus `JWT_SECRET`
+and `ENCRYPTION_KEY` (any random local values are fine). `SEED_DEMO_DATA=true`
+with `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_TEST_EMAIL`/`SEED_TEST_PASSWORD`
+seeds a quick login without registering manually.
+
 ## Scheduler modes — SCHEDULER_MODE (added this session)
 
 `process_scheduled_collections`, `payment_run_scheduler_loop`, and
