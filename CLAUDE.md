@@ -30,9 +30,23 @@ asked.
   Confirm with the project owner whether it's in use before touching it.
   Two other projects in the org (`Bollywood trading`, `Bollywood2`) are
   unrelated to BillSure entirely.
-- Stripe is **not yet connected** — `STRIPE_API_KEY` unset. All Stripe-facing
-  code has been logic-tested against a mock SDK (see Testing section) but
-  never against a real Stripe response.
+- **Stripe test-mode (sandbox) IS now connected** — a real `sk_test_...`
+  key was provided 2026-07-26, validated directly against Stripe
+  (`stripe.Account.retrieve()`: account `acct_1TwSqZGyL4AzZVlU`, country
+  AU) and end-to-end through the actual backend
+  (`POST /payment-methods/setup-intent` → real `client_secret`, using the
+  seeded local test user). This was blocked until the same session found
+  and fixed a real bug: `server.py` called `load_dotenv()` *after*
+  importing `stripe_collections`/`utils.auth`, both of which read env
+  vars at module import time — so `.env` values for `STRIPE_API_KEY`,
+  `JWT_SECRET`, `ENCRYPTION_KEY`, and `RESEND_API_KEY` were silently
+  never applied locally. Fixed by moving `load_dotenv()` to the top of
+  `server.py`, before any local module import. Still only logic-tested
+  (mock SDK) for the scheduled off-session collection path specifically —
+  the one real end-to-end test so far is SetupIntent creation, not yet a
+  full save-a-card → scheduled-charge cycle. Local `STRIPE_API_KEY` lives
+  in `backend/.env` (gitignored) — set it in whatever's actually hosting
+  this before deploying.
 
 ## What's been built and applied (this is real, not a proposal)
 
@@ -240,7 +254,21 @@ separate local database — local testing writes real rows to the live
 project, same as existing test fixtures already there) plus `JWT_SECRET`
 and `ENCRYPTION_KEY` (any random local values are fine). `SEED_DEMO_DATA=true`
 with `SEED_ADMIN_EMAIL`/`SEED_ADMIN_PASSWORD`/`SEED_TEST_EMAIL`/`SEED_TEST_PASSWORD`
-seeds a quick login without registering manually.
+seeds a quick login without registering manually — **use a real-looking
+domain for these** (e.g. `@example.com`), not `.local` or another
+special-use TLD: `models.schemas`'s `EmailStr` validation (via the
+`email-validator` package) rejects reserved/special-use domains outright,
+so a `.local` seed email can be inserted directly into the DB by the
+seeding code but will then fail login through the actual `POST /auth/login`
+endpoint — hit this firsthand, cost a debugging cycle before realising
+the account itself was fine and the email format was the problem.
+`STRIPE_API_KEY` (a real `sk_test_...` sandbox key) and `OPS_ALERT_EMAIL`
+are also set in the working local `.env` as of 2026-07-26 — see the
+Stripe connection note above and `ALERTING.md`. **`load_dotenv()` must
+run before any local module is imported** in `server.py` — see the
+comment at the top of that file; several modules read env vars at import
+time, not lazily, so getting this order wrong silently drops every `.env`
+value for those modules specifically (this bit us once already).
 
 ## Scheduler modes — SCHEDULER_MODE (added this session)
 
@@ -388,11 +416,22 @@ in-browser click-through unreliable this session.
 
 1. Deploy the above (needs your actual hosting access — not something an
    agent without deploy credentials can do alone).
-2. Get Stripe test-mode keys, run one real end-to-end scheduled collection
-   (also exercises the new `StripeCardSetup.jsx` flow for real, and lets
-   you confirm a `collection_attempts` row lands and the ledger balance
-   moves).
-3. Lower priority: evaluate a virtual-account payments provider (Zepto,
+2. **In progress:** Stripe test-mode key is connected and SetupIntent
+   creation verified end-to-end. Still need: complete a full save-a-card
+   → scheduled-charge cycle (confirm a `collection_attempts` row lands
+   and the ledger balance moves for real), and test the `au_becs_debit`
+   path specifically (SetupIntent creation supports it; not yet exercised
+   against real Stripe).
+3. RLS Option B (sign the custom JWT with Supabase's own JWT secret so
+   `request.jwt.claims` works natively, then rewrite migration 008's
+   policies against it) — approved in principle, deliberately **on hold
+   for a maintenance window**: it invalidates every existing session the
+   moment it deploys. Needs the Supabase project's JWT secret (Dashboard
+   → Project Settings → API → JWT Settings) when ready to proceed.
+4. `SCHEDULER_MODE=apscheduler` — built, not yet switched on; needs
+   `DATABASE_URL` (a direct Postgres connection string) when you want
+   restart-survival/multi-instance safety for the three scheduled jobs.
+5. Lower priority: evaluate a virtual-account payments provider (Zepto,
    Monoova, or Zai were discussed) to replace the still-manual BPAY
    disbursement step with a real API and a live external-balance feed for
    `reconciliation.py`'s external check (`_fetch_external_trust_balance()`
