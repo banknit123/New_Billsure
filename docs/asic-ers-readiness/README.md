@@ -46,9 +46,9 @@ Every control/document below is classified as one of:
 | `responsible-lending-workflow.md` | Superseded in practice by `session-2-...md` and `backend/responsible_lending.py`'s own docstrings — a dedicated policy-facing write-up under this exact filename is still not implemented |
 | `customer-funds-safeguarding.md` | Not implemented yet |
 | `reconciliation-process.md` | Not implemented yet (reconciliation.py exists from a prior session; this doc hasn't been written yet) |
-| `security-and-privacy.md` | Not implemented yet |
-| `incident-response.md` | Not implemented yet |
-| `business-continuity.md` | Not implemented yet |
+| `security-and-privacy.md` | Filled in session 13 — see the file for per-item status |
+| `incident-response.md` | Filled in session 13 — code + runbook exist, live drill not run |
+| `business-continuity.md` | Filled in session 13 — code + runbook exist, live test not run |
 | `wind-down-plan.md` | Not implemented yet |
 | `test-evidence.md` | Not implemented yet — the closest equivalent today is the "Test results" section in each session-N note, not yet consolidated |
 
