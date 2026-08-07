@@ -323,3 +323,112 @@ def record_consent(consents: dict, consent_type: str, version: str, accepted_at:
         "accepted_at": accepted_at or datetime.now(timezone.utc).isoformat(),
     }
     return updated
+
+
+# ---------------------------------------------------------------
+# Real identity-verification provider wiring (identity_verification.py).
+# This is the call site that turns identity_verification_status from a
+# caller-supplied field into something backed by an actual check.
+# Deliberately a thin wrapper: onboarding.py stays the source of truth
+# for the application record; identity_verification.py stays entirely
+# unaware that "onboarding applications" exist. Neither module imports
+# the other's data model, only this glue function does.
+# ---------------------------------------------------------------
+
+async def start_identity_verification(application_id: str, workflow_id: Optional[str] = None,
+                                       callback: Optional[str] = None) -> "identity_verification.VerificationSession":
+    """Starts a real (or, in explicitly-gated dev mode, mock) identity
+    verification session for an application and records the session
+    reference on it. Does NOT change identity_verification_status yet —
+    that only happens once a result comes back, via a webhook (see
+    apply_identity_verification_webhook(), the authoritative path) or a
+    manual poll (apply_identity_verification_result(), secondary).
+    Propagates identity_verification.IdentityVerificationError untouched
+    on failure (e.g. no provider configured) rather than swallowing it —
+    this function must never leave an application looking verified when
+    the provider call actually failed. Returns the full
+    VerificationSession (including the `url` the applicant needs to
+    open) rather than just a session id, since a caller building the
+    actual onboarding UI needs that URL."""
+    import identity_verification as idv
+
+    app = await sdb.find_one("onboarding_applications", {"id": application_id})
+    if not app:
+        raise OnboardingError(f"no application {application_id}")
+
+    session = await idv.start_verification_session(applicant_reference=application_id, workflow_id=workflow_id, callback=callback)
+    await sdb.update_one("onboarding_applications", {"id": application_id}, {"identity_verification_session_id": session.session_id})
+    await _append_audit(application_id, "identity_verification_started", app.get("user_id", "system"),
+                         f"provider={session.provider} session={session.session_id}", app,
+                         {"identity_verification_session_id": session.session_id})
+    return session
+
+
+async def apply_identity_verification_result(application_id: str) -> dict:
+    """Secondary path: polls the provider for the application's stored
+    session and updates identity_verification_status to match. Prefer
+    apply_identity_verification_webhook() in production — per
+    identity_verification.py's own docstring, the webhook is Didit's
+    authoritative source, this poll is a fallback (admin 'check now'
+    button, backfill) not the primary flow."""
+    import identity_verification as idv
+
+    app = await sdb.find_one("onboarding_applications", {"id": application_id})
+    if not app:
+        raise OnboardingError(f"no application {application_id}")
+    session_id = app.get("identity_verification_session_id")
+    if not session_id:
+        raise OnboardingError(f"application {application_id} has no identity verification session started yet")
+
+    result = await idv.get_verification_result(session_id)
+    updates = {"identity_verification_status": result.status}
+    await sdb.update_one("onboarding_applications", {"id": application_id}, updates)
+    await _append_audit(application_id, "identity_verification_result_applied", "system",
+                         f"provider={result.provider} status={result.status}", app, updates)
+    return {**app, **updates}
+
+
+async def apply_identity_verification_webhook(raw_body: bytes, signature: str, timestamp: str) -> Optional[dict]:
+    """The authoritative path: verifies a Didit webhook delivery, then
+    applies its decision to the application whose id matches the
+    webhook's `vendor_data` field (onboarding.py's convention is to pass
+    application_id as vendor_data at session-creation time — see
+    start_identity_verification()).
+
+    Idempotent on `event_id`: a duplicate delivery (Didit retries up to
+    twice on 5xx/404) is detected and returns None without reapplying —
+    callers should still return 2xx to Didit for a duplicate, since the
+    correct response is 'already handled', not an error.
+
+    Raises identity_verification.IdentityVerificationError if the
+    signature doesn't verify — callers should return 401 in that case,
+    never process the payload."""
+    import identity_verification as idv
+
+    if not idv.verify_webhook_signature(raw_body, signature, timestamp):
+        raise idv.IdentityVerificationError("webhook signature verification failed — refusing to process this delivery")
+
+    event = idv.parse_webhook_event(raw_body)
+
+    already_processed = await sdb.find_one("didit_webhook_events", {"event_id": event.event_id})
+    if already_processed:
+        return None
+    await sdb.insert_one("didit_webhook_events", {
+        "event_id": event.event_id, "session_id": event.session_id, "application_id": event.vendor_data,
+        "status": event.status, "received_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    application_id = event.vendor_data
+    app = await sdb.find_one("onboarding_applications", {"id": application_id})
+    if not app:
+        # A webhook for an application_id we don't recognise is logged,
+        # not silently dropped and not raised as if it were our error —
+        # the event is still recorded above for audit/debugging.
+        logger.warning("Didit webhook for unknown application_id=%s (session=%s)", application_id, event.session_id)
+        return None
+
+    updates = {"identity_verification_status": event.onboarding_status}
+    await sdb.update_one("onboarding_applications", {"id": application_id}, updates)
+    await _append_audit(application_id, "identity_verification_webhook_applied", "didit_webhook",
+                         f"status={event.status} -> {event.onboarding_status}", app, updates)
+    return {**app, **updates}

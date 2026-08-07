@@ -28,7 +28,7 @@ def _reload_with_env(**env):
     the change — those are read once at import time, matching how the
     rest of this codebase (e.g. ALLOW_MOCK_PAYMENTS in server.py) reads
     feature flags."""
-    for k in ("DIDIT_API_KEY", "DIDIT_BASE_URL", "ALLOW_MOCK_IDENTITY_VERIFICATION"):
+    for k in ("DIDIT_API_KEY", "DIDIT_BASE_URL", "DIDIT_WORKFLOW_ID", "DIDIT_WEBHOOK_SECRET", "ALLOW_MOCK_IDENTITY_VERIFICATION"):
         os.environ.pop(k, None)
     os.environ.update(env)
     if "identity_verification" in sys.modules:
@@ -54,10 +54,11 @@ async def main():
     # Mock mode must be explicitly enabled — never a default
     # ---------------------------------------------------------------
     iv2 = _reload_with_env(ALLOW_MOCK_IDENTITY_VERIFICATION="true")
-    session_id = await iv2.start_verification_session("applicant-2")
-    check("mock session starts once ALLOW_MOCK_IDENTITY_VERIFICATION=true is explicitly set", session_id.startswith("mock-session-"))
+    session = await iv2.start_verification_session("applicant-2")
+    check("mock session starts once ALLOW_MOCK_IDENTITY_VERIFICATION=true is explicitly set",
+          session.session_id.startswith("mock-session-") and session.provider == "mock")
 
-    result = await iv2.get_verification_result(session_id)
+    result = await iv2.get_verification_result(session.session_id)
     check("mock verification result reports status='verified'", result.status == "verified")
     check("mock verification result is honestly labelled provider='mock', not 'didit'", result.provider == "mock")
     check("mock result's raw_response makes clear this is not a real check", "MOCK" in result.raw_response.get("note", ""))
@@ -68,7 +69,7 @@ async def main():
     # ---------------------------------------------------------------
     iv3 = _reload_with_env()  # mock disabled again, no key
     try:
-        await iv3.get_verification_result(session_id)
+        await iv3.get_verification_result(session.session_id)
         check("refuses to trust a mock session id if mock mode has since been disabled", False)
     except iv3.IdentityVerificationError:
         check("refuses to trust a mock session id if mock mode has since been disabled", True)
