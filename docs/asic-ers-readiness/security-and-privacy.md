@@ -5,9 +5,9 @@ legend in `README.md`.
 
 | Control | Status | Notes |
 |---|---|---|
-| Role-based access control | Implemented and tested | `security_controls.ROLE_PERMISSIONS` — 5 roles, explicit least-privilege matrix, no blanket admin superuser shortcut (tested directly). |
+| Role-based access control | Implemented and tested | `security_controls.ROLE_PERMISSIONS` — 5 roles, explicit least-privilege matrix, no blanket admin superuser shortcut (tested directly). **Now wired into `pilot_api.py` as real HTTP middleware (session 16)** — every non-public endpoint enforces a specific permission, proven over real HTTP (e.g. a customer key is refused 403 from activating credit). |
 | Least privilege | Implemented and tested | Same as above — admin does not automatically inherit every permission; each is granted explicitly per role. |
-| Multifactor authentication for administrators | Partially implemented | `security_controls.requires_mfa()`/`require_mfa_verified()` correctly gate admin/compliance-reviewer actions and are tested. No real MFA provider (TOTP/SMS) is integrated — `record_mfa_verification()` is bookkeeping only; a real second factor must actually succeed before a caller records it. |
+| Multifactor authentication for administrators | Partially implemented | `security_controls.requires_mfa()`/`require_mfa_verified()` correctly gate admin/compliance-reviewer actions and are tested, **and are now enforced over real HTTP in `pilot_api.py`** — an admin key issued without `mfa_verified=True` is refused 403 from privileged actions, proven directly. No real MFA provider (TOTP/SMS) is integrated — `mfa_verified` on an API key is operator-asserted trust (set via `issue_pilot_api_key.py --mfa-verified` only after genuinely confirming identity out-of-band), not independently verified by the software. |
 | Secure session management | Not implemented in this workstream | `utils/auth.py`'s existing JWT with 4-hour expiry (prior session's work) is what's live; no session-revocation mechanism beyond expiry/full secret rotation. |
 | Encryption in transit | External dependency | Depends on the actual deployment's TLS termination — not something this codebase configures. |
 | Encryption at rest | Implemented (prior session) | `utils/auth.py`'s Fernet `encrypt_field()`/`decrypt_field()`, fails closed if `ENCRYPTION_KEY` unset. |
