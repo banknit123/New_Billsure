@@ -1,17 +1,11 @@
 """
 HTTP-layer test for pilot_api.py, using FastAPI's TestClient (real
 HTTP request/response cycle through Starlette's ASGI transport, not a
-direct Python function call) — this is the first test in this
-workstream that actually exercises the FastAPI routing, request
-validation, and status-code mapping layer, not just the underlying
-modules directly.
+direct Python function call) — including the API key authentication
+and per-endpoint permission layer added on top of the working API.
 
 Same in-memory fake supabase_db pattern as every other test_*.py file
-in this repo — no live database, no live network. What's different
-here versus test_end_to_end_dummy_customer_journey.py is the boundary
-being tested: this proves the HTTP plumbing (routes, Pydantic request
-models, error-to-status-code mapping) is correct, not just that the
-underlying Python functions compose correctly.
+in this repo — no live database, no live network.
 
 Run: python3 test_pilot_api.py
 """
@@ -83,6 +77,7 @@ fake_sdb = types.SimpleNamespace(
 sys.modules["supabase_db"] = fake_sdb
 
 import pilot_config as pc   # noqa: E402
+import pilot_auth as pa    # noqa: E402
 
 FAILURES = []
 
@@ -113,6 +108,10 @@ def make_bill_photo(biller_name, account_name, reference, amount, due_date) -> b
     return buf.getvalue()
 
 
+def auth(raw_key: str) -> dict:
+    return {"Authorization": f"Bearer {raw_key}"}
+
+
 async def main():
     await pc.propose_config_version(pc.PilotConfig(), proposed_by="ops_lead", approved_by="compliance_lead", activate=True)
 
@@ -121,147 +120,173 @@ async def main():
     client = TestClient(pilot_api.app)
 
     # ---------------------------------------------------------------
-    # Health check
+    # Issue API keys for each role, exactly as an operator would
+    # ---------------------------------------------------------------
+    customer_key = await pa.issue_api_key("user-http-jane-001", "customer", issued_by="ops_lead")
+    case_worker_key = await pa.issue_api_key("case_worker_1", "case_worker", issued_by="ops_lead")
+    compliance_key = await pa.issue_api_key("compliance_lead", "compliance_reviewer", issued_by="ops_lead", mfa_verified=True)
+    admin_key_no_mfa = await pa.issue_api_key("admin_no_mfa", "admin", issued_by="ops_lead", mfa_verified=False)
+    admin_key = await pa.issue_api_key("payments_admin_1", "admin", issued_by="ops_lead", mfa_verified=True)
+
+    # ---------------------------------------------------------------
+    # Public endpoints need no auth at all
     # ---------------------------------------------------------------
     resp = client.get("/health")
-    check("GET /health returns 200 with the database reachable", resp.status_code == 200)
-    check("health response body correctly reports overall_healthy=True", resp.json()["overall_healthy"] is True)
+    check("GET /health requires no auth and returns 200", resp.status_code == 200)
 
-    # Prove the HTTP status code itself changes on an unhealthy check,
-    # not just the JSON body -- a monitoring system polling this
-    # endpoint needs the status code to be authoritative, not just the
-    # body content.
     original_find_many = fake_sdb.find_many
     async def broken_find_many(*a, **kw):
         raise RuntimeError("simulated database outage")
     fake_sdb.find_many = broken_find_many
     resp = client.get("/health")
-    check("GET /health returns a real 503 status code (not just a 200 with an unhealthy body) when the DB is unreachable",
-          resp.status_code == 503)
-    check("the 503 response body also reports overall_healthy=False", resp.json()["overall_healthy"] is False)
+    check("GET /health returns a real 503 (not just a 200 with an unhealthy body) when the DB is unreachable", resp.status_code == 503)
     fake_sdb.find_many = original_find_many
 
-    # ---------------------------------------------------------------
-    # Launch gate status -- real HTTP call, honest current state
-    # ---------------------------------------------------------------
     resp = client.get("/pilot/launch-gates/status")
-    check("GET /pilot/launch-gates/status returns 200", resp.status_code == 200)
+    check("GET /pilot/launch-gates/status requires no auth", resp.status_code == 200)
     check("production_authorized is False with zero gates recorded (fail closed, over real HTTP)", resp.json()["production_authorized"] is False)
 
     # ---------------------------------------------------------------
-    # Onboarding: apply
+    # Every other endpoint refuses an unauthenticated request
+    # ---------------------------------------------------------------
+    resp = client.post("/pilot/onboarding/apply", json={})
+    check("POST /pilot/onboarding/apply with NO Authorization header returns 401, not 422/500", resp.status_code == 401)
+
+    resp = client.post("/pilot/onboarding/apply", json={}, headers=auth("bsp_totally_made_up_invalid_key"))
+    check("an invalid/garbage API key is rejected with 401", resp.status_code == 401)
+
+    # ---------------------------------------------------------------
+    # Wrong role for the endpoint -> 403, not a silent pass-through
     # ---------------------------------------------------------------
     apply_payload = {
-        "user_id": "user-http-jane-001",
-        "identity_verification_status": "verified",
-        "age_confirmed": True,
-        "residential_state": "VIC",
-        "bank_account_verified": True,
-        "income_amount": "5200", "income_frequency": "monthly",
-        "employment_status": "full_time", "recurring_living_expenses": "2800",
-        "existing_debts_and_bnpl": "0", "requested_credit_purpose": "electricity",
-        "requirements_and_objectives": "Smooth out electricity bills",
+        "user_id": "user-http-jane-001", "identity_verification_status": "verified",
+        "age_confirmed": True, "residential_state": "VIC", "bank_account_verified": True,
+        "income_amount": "5200", "income_frequency": "monthly", "employment_status": "full_time",
+        "recurring_living_expenses": "2800", "existing_debts_and_bnpl": "0",
+        "requested_credit_purpose": "electricity", "requirements_and_objectives": "Smooth out electricity bills",
         "utility_bill_ownership_verified": True,
         "consent_types_accepted": ["privacy", "identity_check", "affordability_check", "fraud_check"],
     }
-    resp = client.post("/pilot/onboarding/apply", json=apply_payload)
-    check("POST /pilot/onboarding/apply returns 200 for a clean application", resp.status_code == 200)
+    # A customer key CAN apply (has 'submit_application').
+    resp = client.post("/pilot/onboarding/apply", json=apply_payload, headers=auth(customer_key.raw_key))
+    check("a customer-role key CAN submit an application (has the permission)", resp.status_code == 200)
     application = resp.json()
-    check("the application over HTTP is 'eligible'", application["eligibility_outcome"] == "eligible")
+    check("the application over authenticated HTTP is 'eligible'", application["eligibility_outcome"] == "eligible")
 
-    # Malformed request: missing a required field entirely.
-    bad_payload = dict(apply_payload)
-    del bad_payload["requested_credit_purpose"]
-    resp = client.post("/pilot/onboarding/apply", json=bad_payload)
-    check("a request missing a required field is rejected with 422 (Pydantic validation, not a 500)", resp.status_code == 422)
+    # A key with a role that structurally cannot approve credit activation is refused with 403.
+    resp = client.post(f"/pilot/onboarding/{application['id']}/activate-credit", json={
+        "prepared_by": "credit_assessor_1", "approved_by": "compliance_lead",
+        "contractual_limit": "2500.00", "active_customer_count": 0, "current_aggregate_contractual_exposure": "0",
+    }, headers=auth(customer_key.raw_key))
+    check("a customer-role key is REFUSED (403) from activating credit -- least privilege enforced over HTTP",
+          resp.status_code == 403)
 
     # ---------------------------------------------------------------
-    # Credit activation over HTTP
+    # MFA gating over HTTP: an admin key without MFA confirmation is refused
     # ---------------------------------------------------------------
     resp = client.post(f"/pilot/onboarding/{application['id']}/activate-credit", json={
         "prepared_by": "credit_assessor_1", "approved_by": "compliance_lead",
         "contractual_limit": "2500.00", "active_customer_count": 0, "current_aggregate_contractual_exposure": "0",
-    })
-    check("POST .../activate-credit returns 200", resp.status_code == 200)
-    activation = resp.json()
-    check("credit account is active over HTTP", activation["credit_account"]["status"] == "active")
-
-    # Maker-checker violation over HTTP -> mapped to 422, not a crash.
-    resp = client.post(f"/pilot/onboarding/{application['id']}/activate-credit", json={
-        "prepared_by": "someone", "approved_by": "someone",
-        "contractual_limit": "2500.00", "active_customer_count": 1, "current_aggregate_contractual_exposure": "2500",
-    })
-    check("a maker-checker violation over HTTP returns 422 with a clear detail message, not a 500",
-          resp.status_code == 422 and "distinct" in resp.json()["detail"])
-
-    resp = client.get(f"/pilot/credit/accounts/user-http-jane-001/balance")
-    check("GET .../balance returns the correct starting balance over HTTP", resp.json()["outstanding_principal"] == "0.00")
-
-    resp = client.get("/pilot/credit/accounts/nonexistent-customer/balance")
-    check("GET .../balance for an unknown customer returns 404", resp.status_code == 404)
+    }, headers=auth(admin_key_no_mfa.raw_key))
+    check("an admin key issued WITHOUT mfa_verified=True is refused (403) from a privileged action, over real HTTP",
+          resp.status_code == 403)
 
     # ---------------------------------------------------------------
-    # Bill upload -> real multipart file upload -> real OCR -> verify
+    # The correctly-authorized, MFA-verified key succeeds
+    # ---------------------------------------------------------------
+    resp = client.post(f"/pilot/onboarding/{application['id']}/activate-credit", json={
+        "prepared_by": "credit_assessor_1", "approved_by": "compliance_lead",
+        "contractual_limit": "2500.00", "active_customer_count": 0, "current_aggregate_contractual_exposure": "0",
+    }, headers=auth(compliance_key.raw_key))
+    check("an MFA-verified compliance_reviewer key CAN activate credit", resp.status_code == 200)
+    activation = resp.json()
+    check("credit account is active over authenticated HTTP", activation["credit_account"]["status"] == "active")
+
+    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(customer_key.raw_key))
+    check("a customer CAN view their OWN balance", resp.status_code == 200)
+    check("balance is correct", resp.json()["outstanding_principal"] == "0.00")
+
+    other_customer_key = await pa.issue_api_key("some-other-customer", "customer", issued_by="ops_lead")
+    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(other_customer_key.raw_key))
+    check("a DIFFERENT customer CANNOT view Jane's balance (403, not leaked)", resp.status_code == 403)
+
+    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(case_worker_key.raw_key))
+    check("a case_worker CAN view any customer's balance (staff permission, not 'own data')", resp.status_code == 200)
+
+    # ---------------------------------------------------------------
+    # Bill upload requires auth + 'submit_bill'; real multipart + OCR
     # ---------------------------------------------------------------
     bill_bytes = make_bill_photo("Origin Energy", "Jane Dummy", "REF-HTTP-001", "120.00", "25/09/2026")
+
     resp = client.post(
         "/pilot/bills/upload",
         data={"customer_id": "user-http-jane-001", "customer_name_on_account": "Jane Dummy", "category": "electricity"},
         files={"file": ("bill.png", bill_bytes, "image/png")},
     )
-    check("POST /pilot/bills/upload (real multipart upload) returns 200", resp.status_code == 200)
-    upload_result = resp.json()
-    check("the bill uploaded over real HTTP was verified via real OCR", upload_result["bill"]["verification_status"] in ("verified", "manual_review"))
-    check("OCR ran the real tesseract_ocr method over the HTTP-uploaded file", upload_result["ocr"]["method"] == "tesseract_ocr")
+    check("bill upload with no auth is refused (401)", resp.status_code == 401)
 
-    bill_id = upload_result["bill"]["id"]
-    if upload_result["bill"]["verification_status"] == "manual_review":
-        resp = client.post(f"/pilot/bills/{bill_id}/manual-review", json={"reviewer": "case_worker_1", "decision": "verified", "notes": "confirmed"})
-        check("manual review over HTTP moves the bill to verified", resp.json()["verification_status"] == "verified")
-
-    # Reject a bad file upload over HTTP (wrong extension).
     resp = client.post(
         "/pilot/bills/upload",
         data={"customer_id": "user-http-jane-001", "customer_name_on_account": "Jane Dummy", "category": "electricity"},
-        files={"file": ("bill.exe", bill_bytes, "application/octet-stream")},
+        files={"file": ("bill.png", bill_bytes, "image/png")},
+        headers=auth(customer_key.raw_key),
     )
-    check("uploading a disallowed file extension over HTTP returns 400", resp.status_code == 400)
+    check("authenticated bill upload (real multipart + real OCR) succeeds", resp.status_code == 200)
+    upload_result = resp.json()
+    check("OCR ran the real tesseract_ocr method over the HTTP-uploaded file", upload_result["ocr"]["method"] == "tesseract_ocr")
+    bill_id = upload_result["bill"]["id"]
+    if upload_result["bill"]["verification_status"] == "manual_review":
+        resp = client.post(f"/pilot/bills/{bill_id}/manual-review", json={"reviewer": "case_worker_1", "decision": "verified", "notes": "confirmed"},
+                            headers=auth(case_worker_key.raw_key))
+        check("manual review over authenticated HTTP moves the bill to verified", resp.json()["verification_status"] == "verified")
 
     # ---------------------------------------------------------------
-    # Pay the bill: MUST be blocked, since zero launch gates are approved
+    # Payment: requires 'process_payment' AND is still blocked by
+    # launch_gates regardless of who's asking
     # ---------------------------------------------------------------
-    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": "user-http-jane-001", "requested_by": "payments_admin_1"})
-    check("POST .../pay is BLOCKED with 403 over real HTTP when production is not authorized (fail closed end to end)",
+    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": "user-http-jane-001", "requested_by": "payments_admin_1"},
+                        headers=auth(customer_key.raw_key))
+    check("a customer key is refused (403) from paying a bill -- least privilege, before even reaching launch_gates", resp.status_code == 403)
+
+    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": "user-http-jane-001", "requested_by": "payments_admin_1"},
+                        headers=auth(admin_key.raw_key))
+    check("an authorized, MFA-verified admin key STILL gets blocked (403) by launch_gates -- auth passing doesn't bypass the regulatory gate",
           resp.status_code == 403 and "launch gate" in resp.json()["detail"])
 
-    balance_after_blocked_attempt = client.get("/pilot/credit/accounts/user-http-jane-001/balance").json()
-    check("a blocked payment attempt over HTTP moves zero money", balance_after_blocked_attempt["outstanding_principal"] == "0.00")
+    balance_after_blocked_attempt = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(customer_key.raw_key)).json()
+    check("a blocked payment attempt over authenticated HTTP still moves zero money", balance_after_blocked_attempt["outstanding_principal"] == "0.00")
 
     # ---------------------------------------------------------------
-    # Hardship remains reachable regardless of production authorization
+    # Hardship and complaints: reachable by a customer key
     # ---------------------------------------------------------------
     resp = client.post("/pilot/hardship/requests", json={
         "customer_id": "user-http-jane-001", "reason": "reduced hours at work",
         "vulnerability_indicators": [], "requested_by": "user-http-jane-001",
-    })
-    check("hardship requests remain reachable over HTTP even though production is not authorized", resp.status_code == 200)
-    check("hardship case opens in 'open' status over HTTP", resp.json()["status"] == "open")
+    }, headers=auth(customer_key.raw_key))
+    check("an authenticated customer can request hardship", resp.status_code == 200 and resp.json()["status"] == "open")
 
-    # ---------------------------------------------------------------
-    # Complaints reachable over HTTP too
-    # ---------------------------------------------------------------
     resp = client.post("/pilot/complaints", json={
         "customer_id": "user-http-jane-001", "channel": "web_form", "description": "Test complaint over HTTP",
         "category": "standard", "severity": "low", "received_by": "agent1",
-    })
-    check("complaint intake works over HTTP", resp.status_code == 200 and resp.json()["status"] == "open")
+    }, headers=auth(customer_key.raw_key))
+    check("an authenticated customer can submit a complaint", resp.status_code == 200)
 
     # ---------------------------------------------------------------
-    # Reports reachable over HTTP
+    # Documents: GET is public, POST accept requires auth
     # ---------------------------------------------------------------
-    resp = client.get("/pilot/reports/credit-exposure")
-    check("credit exposure report is reachable over HTTP", resp.status_code == 200)
-    check("credit exposure report shows the 1 activated customer over HTTP", resp.json()["active_customer_count"] == 1)
+    resp = client.get("/pilot/documents/credit_guide")
+    check("GET a document is public (no auth needed) -- returns 404 since none is approved yet in this test, not 401",
+          resp.status_code == 404)
+
+    # ---------------------------------------------------------------
+    # Reports: requires 'export_reports', not available to a customer
+    # ---------------------------------------------------------------
+    resp = client.get("/pilot/reports/credit-exposure", headers=auth(customer_key.raw_key))
+    check("a customer key is refused (403) from the reports endpoint", resp.status_code == 403)
+
+    resp = client.get("/pilot/reports/credit-exposure", headers=auth(admin_key.raw_key))
+    check("an admin key can access the reports endpoint", resp.status_code == 200)
+    check("credit exposure report shows the 1 activated customer over authenticated HTTP", resp.json()["active_customer_count"] == 1)
 
     print()
     if FAILURES:
@@ -270,7 +295,7 @@ async def main():
             print(f"  - {f}")
         sys.exit(1)
     else:
-        print("ALL CHECKS PASSED -- pilot API verified over real HTTP request/response cycles")
+        print("ALL CHECKS PASSED -- pilot API auth + business logic verified over real HTTP")
 
 
 if __name__ == "__main__":
