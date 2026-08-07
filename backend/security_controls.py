@@ -56,16 +56,27 @@ ROLES = ("customer", "case_worker", "compliance_reviewer", "admin", "system")
 # adding a new permission requires a conscious decision about which
 # roles get it, rather than every existing admin silently inheriting it.
 ROLE_PERMISSIONS = {
-    "customer": frozenset({"view_own_data", "submit_bill", "submit_complaint", "request_hardship", "accept_document"}),
+    "customer": frozenset({"view_own_data", "submit_bill", "submit_complaint", "request_hardship", "accept_document",
+                            "submit_application", "start_identity_verification", "view_own_balance"}),
     "case_worker": frozenset({"view_own_data", "view_assigned_complaints", "add_investigation_note",
-                               "record_customer_communication", "acknowledge_complaint"}),
+                               "record_customer_communication", "acknowledge_complaint",
+                               "submit_application", "manual_review_application", "manual_review_bill",
+                               "view_customer_balances", "submit_bill", "request_hardship", "submit_complaint",
+                               "start_identity_verification"}),
     "compliance_reviewer": frozenset({"view_own_data", "view_assigned_complaints", "add_investigation_note",
                                        "record_customer_communication", "acknowledge_complaint",
                                        "approve_remedy", "resolve_complaint", "approve_document_version",
-                                       "approve_credit_activation", "approve_config_change", "approve_launch_gate"}),
+                                       "approve_credit_activation", "approve_config_change", "approve_launch_gate",
+                                       "manual_review_application", "manual_review_bill", "view_customer_balances",
+                                       "process_payment", "export_reports"}),
     "admin": frozenset({"view_own_data", "manage_users", "view_audit_log", "export_reports",
-                         "manage_biller_allowlist", "propose_config_change"}),
-    "system": frozenset({"post_ledger_entry", "record_webhook_event", "run_reconciliation"}),
+                         "manage_biller_allowlist", "propose_config_change",
+                         "submit_application", "manual_review_application", "manual_review_bill",
+                         "view_customer_balances", "process_payment", "approve_credit_activation",
+                         "submit_bill", "request_hardship", "submit_complaint", "accept_document",
+                         "start_identity_verification"}),
+    "system": frozenset({"post_ledger_entry", "record_webhook_event", "run_reconciliation",
+                          "process_payment", "view_customer_balances"}),
 }
 
 
