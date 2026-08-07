@@ -30,13 +30,25 @@ is checked before any endpoint that draws credit or activates a
 customer account; with zero gates recorded (the honest current state),
 those endpoints correctly return 403 until gates are genuinely
 approved outside this repository.
+
+AUTHENTICATION: every endpoint except the explicitly-public ones
+(`/health`, `/pilot/launch-gates/status`, `GET /pilot/documents/{type}`)
+and the ones with their own real authentication (`/pilot/identity/
+webhook`, which verifies an HMAC signature) requires a valid API key —
+`Authorization: Bearer <key>` — issued via `pilot_auth.issue_api_key()`
+and checked against a specific permission from `security_controls.
+ROLE_PERMISSIONS`, not a single blanket "is authenticated" gate. See
+`pilot_auth.py`'s module docstring for why this is a simple,
+operator-issued API-key scheme rather than full customer self-service
+authentication — appropriate for a private testing deployment, not yet
+a public product.
 """
 
 import logging
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -59,6 +71,7 @@ import document_versioning as dv
 import regulatory_reports as rr
 import security_controls as sc
 import operational_readiness as opr
+import pilot_auth as pa
 
 logger = logging.getLogger(__name__)
 logger.addFilter(sc.PiiRedactingLogFilter())
@@ -105,6 +118,46 @@ def _raise_as_http(e: Exception):
             raise HTTPException(status_code=code, detail=str(e))
     logger.exception("Unhandled error in pilot API")
     raise HTTPException(status_code=500, detail="internal error")
+
+
+# ---------------------------------------------------------------
+# Authentication / authorization
+# ---------------------------------------------------------------
+# Every endpoint below EXCEPT the ones explicitly listed as public
+# (/health, /pilot/launch-gates/status, GET document text) or the ones
+# with their OWN real authentication (/pilot/identity/webhook, which
+# verifies an HMAC signature instead) requires a valid API key via
+# `Authorization: Bearer <key>`, checked against pilot_auth.py, with a
+# specific permission from security_controls.ROLE_PERMISSIONS enforced
+# per endpoint -- not a single blanket "is authenticated" check. See
+# pilot_auth.py's module docstring for why this is an operator-issued
+# API key scheme rather than full customer self-service auth.
+
+async def get_current_actor(authorization: str = Header(default=None)) -> dict:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing or malformed Authorization header (expected 'Bearer <api key>')")
+    raw_key = authorization.split(" ", 1)[1].strip()
+    actor = await pa.verify_api_key(raw_key)
+    if not actor:
+        raise HTTPException(status_code=401, detail="invalid or revoked API key")
+    return actor
+
+
+def require(permission: str):
+    """Dependency factory: returns a FastAPI dependency that resolves
+    the authenticated actor, then enforces both the specific
+    permission AND (for MFA_REQUIRED_ROLES) that the key was issued
+    with mfa_verified=True -- both checks reuse security_controls.py's
+    existing, independently-tested functions rather than reimplementing
+    them here."""
+    async def _dependency(actor: dict = Depends(get_current_actor)) -> dict:
+        try:
+            sc.require_permission(actor["role"], permission)
+            sc.require_mfa_verified(actor["role"], actor.get("mfa_verified", False))
+        except sc.SecurityControlError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        return actor
+    return _dependency
 
 
 # ---------------------------------------------------------------
@@ -157,7 +210,7 @@ class StartIdentityVerificationRequest(BaseModel):
 
 
 @app.post("/pilot/identity/sessions")
-async def start_identity_verification(req: StartIdentityVerificationRequest):
+async def start_identity_verification(req: StartIdentityVerificationRequest, actor: dict = Depends(require("start_identity_verification"))):
     try:
         session = await idv.start_verification_session(req.applicant_reference, workflow_id=req.workflow_id, callback=req.callback)
     except Exception as e:
@@ -206,7 +259,7 @@ class ApplyRequest(BaseModel):
 
 
 @app.post("/pilot/onboarding/apply")
-async def apply(req: ApplyRequest):
+async def apply(req: ApplyRequest, actor: dict = Depends(require("submit_application"))):
     active_config = await pc.get_active_config()
     if not active_config:
         raise HTTPException(status_code=503, detail="no active pilot configuration -- cannot evaluate an application")
@@ -242,7 +295,7 @@ class ManualReviewRequest(BaseModel):
 
 
 @app.post("/pilot/onboarding/{application_id}/manual-review")
-async def manual_review(application_id: str, req: ManualReviewRequest):
+async def manual_review(application_id: str, req: ManualReviewRequest, actor: dict = Depends(require("manual_review_application"))):
     try:
         return await ob.record_manual_review_outcome(application_id, req.reviewer, req.outcome, req.reason_codes, req.notes)
     except Exception as e:
@@ -258,7 +311,7 @@ class ActivateCreditRequest(BaseModel):
 
 
 @app.post("/pilot/onboarding/{application_id}/activate-credit")
-async def activate_credit(application_id: str, req: ActivateCreditRequest):
+async def activate_credit(application_id: str, req: ActivateCreditRequest, actor: dict = Depends(require("approve_credit_activation"))):
     """Two-step activation: onboarding-side maker-checker AND the
     credit_ledger-side account creation (its own maker-checker + cap
     checks), matching test_end_to_end_dummy_customer_journey.py's
@@ -280,7 +333,16 @@ async def activate_credit(application_id: str, req: ActivateCreditRequest):
 # ---------------------------------------------------------------
 
 @app.get("/pilot/credit/accounts/{customer_id}/balance")
-async def credit_balance(customer_id: str):
+async def credit_balance(customer_id: str, actor: dict = Depends(get_current_actor)):
+    """A customer may view their OWN balance (actor_id == customer_id,
+    checked here since it depends on the path parameter, not a static
+    permission); staff/system roles with 'view_customer_balances' may
+    view any customer's balance."""
+    is_own_data = actor["actor_id"] == customer_id and sc.has_permission(actor["role"], "view_own_balance")
+    is_staff = sc.has_permission(actor["role"], "view_customer_balances")
+    if not (is_own_data or is_staff):
+        raise HTTPException(status_code=403, detail="not authorized to view this customer's balance")
+
     account = await cl.get_customer_credit_account(customer_id)
     if not account:
         raise HTTPException(status_code=404, detail="no credit account for this customer")
@@ -298,6 +360,7 @@ async def credit_balance(customer_id: str):
 async def upload_bill(
     customer_id: str = Form(...), customer_name_on_account: str = Form(...),
     category: str = Form(...), file: UploadFile = File(...),
+    actor: dict = Depends(require("submit_bill")),
 ):
     content = await file.read()
     try:
@@ -333,7 +396,7 @@ class BillManualReviewRequest(BaseModel):
 
 
 @app.post("/pilot/bills/{bill_id}/manual-review")
-async def bill_manual_review(bill_id: str, req: BillManualReviewRequest):
+async def bill_manual_review(bill_id: str, req: BillManualReviewRequest, actor: dict = Depends(require("manual_review_bill"))):
     try:
         return await bv.record_manual_review_decision(bill_id, req.reviewer, req.decision, req.notes)
     except Exception as e:
@@ -346,7 +409,7 @@ class PayBillRequest(BaseModel):
 
 
 @app.post("/pilot/bills/{bill_id}/pay")
-async def pay_bill(bill_id: str, req: PayBillRequest):
+async def pay_bill(bill_id: str, req: PayBillRequest, actor: dict = Depends(require("process_payment"))):
     """The single highest-consequence endpoint in this API: this is
     where real money would move. Checks launch_gates.
     is_production_authorized() BEFORE calling into the payment flow --
@@ -378,7 +441,7 @@ class HardshipRequest(BaseModel):
 
 
 @app.post("/pilot/hardship/requests")
-async def request_hardship(req: HardshipRequest):
+async def request_hardship(req: HardshipRequest, actor: dict = Depends(require("request_hardship"))):
     """No launch-gate or credit-status check here, deliberately --
     hardship support must remain available regardless of production
     authorization status (see launch_gates.existing_customers_route())."""
@@ -403,7 +466,7 @@ class ComplaintRequest(BaseModel):
 
 
 @app.post("/pilot/complaints")
-async def submit_complaint(req: ComplaintRequest):
+async def submit_complaint(req: ComplaintRequest, actor: dict = Depends(require("submit_complaint"))):
     try:
         return await cp.intake_complaint(req.customer_id, req.channel, req.description, req.category,
                                           req.severity, req.vulnerability_indicators, req.received_by)
@@ -430,7 +493,7 @@ class AcceptDocumentRequest(BaseModel):
 
 
 @app.post("/pilot/documents/{document_type}/accept")
-async def accept_document(document_type: str, req: AcceptDocumentRequest):
+async def accept_document(document_type: str, req: AcceptDocumentRequest, actor: dict = Depends(require("accept_document"))):
     try:
         return await dv.record_customer_acceptance(req.customer_id, document_type, req.version_id, ip_address=req.ip_address)
     except Exception as e:
@@ -442,6 +505,6 @@ async def accept_document(document_type: str, req: AcceptDocumentRequest):
 # ---------------------------------------------------------------
 
 @app.get("/pilot/reports/credit-exposure")
-async def credit_exposure_report():
+async def credit_exposure_report(actor: dict = Depends(require("export_reports"))):
     snapshot = await cl.get_exposure_snapshot()
     return rr.credit_exposure_report(snapshot)
