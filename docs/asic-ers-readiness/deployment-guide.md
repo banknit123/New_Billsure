@@ -24,6 +24,35 @@ project dedicated to this pilot:
 3. Note the Project URL and the `service_role` key (Project Settings →
    API) — these become `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` below.
 
+## Step 0.5 — issue your first API keys (do this once you have Step 0's Supabase project)
+
+`pilot_api.py` now requires an API key on every endpoint except the
+public status checks (`/health`, `/pilot/launch-gates/status`) and
+document viewing. Run the migrations (Step 0) first, then, with
+`SUPABASE_URL`/`SUPABASE_SERVICE_KEY` set in your shell to the sandbox
+project:
+
+```bash
+cd backend
+python3 issue_pilot_api_key.py --actor-id your_name --role admin \
+    --issued-by yourself --mfa-verified --notes "first admin key, confirmed identity directly"
+```
+
+This prints a raw key exactly once — save it (a password manager, not
+a note or a chat message). Issue additional keys for other roles
+(`customer`, `case_worker`, `compliance_reviewer`, `system`) the same
+way as you need them for testing. Every privileged action (activating
+credit, approving a payment, viewing reports) requires the key's role
+to hold the specific permission — see `security_controls.
+ROLE_PERMISSIONS` for the exact matrix, and `pilot_auth.py`'s module
+docstring for why this is a simple operator-issued scheme rather than
+full customer self-service login.
+
+**Never set `--mfa-verified` unless you've genuinely confirmed the
+operator's identity out-of-band** — this codebase has no real MFA
+provider integrated; the flag is trust you're asserting yourself, not
+something the software verifies independently.
+
 ## Step 1 — push this branch to GitHub
 
 If you're reading this from the PR, merge it (or push `main` directly)
@@ -100,12 +129,15 @@ Walk Jane Dummy's journey for real, against your new URL:
 
 ```bash
 BASE=https://pilot-api.billsure.com.au
+KEY="<the raw key issue_pilot_api_key.py printed for you>"
 
-# 1. Confirm production is correctly NOT authorized yet (expected).
+# 1. Confirm production is correctly NOT authorized yet (expected). Public, no auth needed.
 curl $BASE/pilot/launch-gates/status
 
-# 2. Apply.
-curl -X POST $BASE/pilot/onboarding/apply -H "Content-Type: application/json" -d '{
+# 2. Apply. Requires a key with the 'submit_application' permission
+#    (customer, case_worker, or admin role).
+curl -X POST $BASE/pilot/onboarding/apply \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $KEY" -d '{
   "user_id": "user-real-test-001", "identity_verification_status": "verified",
   "age_confirmed": true, "residential_state": "VIC", "bank_account_verified": true,
   "income_amount": "5200", "income_frequency": "monthly", "employment_status": "full_time",
@@ -116,18 +148,22 @@ curl -X POST $BASE/pilot/onboarding/apply -H "Content-Type: application/json" -d
 }'
 
 # 3. Activate credit (use the application id from step 2's response).
-curl -X POST $BASE/pilot/onboarding/<application_id>/activate-credit -H "Content-Type: application/json" -d '{
+#    Requires a compliance_reviewer or admin key with mfa_verified=True.
+curl -X POST $BASE/pilot/onboarding/<application_id>/activate-credit \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $KEY" -d '{
   "prepared_by": "assessor1", "approved_by": "compliance1",
   "contractual_limit": "2500.00", "active_customer_count": 0, "current_aggregate_contractual_exposure": "0"
 }'
 
 # 4. Upload a real bill photo (a genuine photo from your phone works here).
-curl -X POST $BASE/pilot/bills/upload \
+curl -X POST $BASE/pilot/bills/upload -H "Authorization: Bearer $KEY" \
   -F "customer_id=user-real-test-001" -F "customer_name_on_account=Your Name" \
   -F "category=electricity" -F "file=@/path/to/a/real/bill/photo.jpg"
 
-# 5. Attempt payment -- expect 403, this is correct.
+# 5. Attempt payment -- expect 403, this is correct (a launch gate is
+#    unapproved, independent of whether your key has the right role).
 curl -X POST $BASE/pilot/bills/<bill_id>/pay -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $KEY" \
   -d '{"customer_id": "user-real-test-001", "requested_by": "admin1"}'
 ```
 
