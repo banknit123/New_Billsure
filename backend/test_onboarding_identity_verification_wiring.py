@@ -97,10 +97,11 @@ async def main():
     importlib.reload(sys.modules["identity_verification"])
 
     session_id = await ob.start_identity_verification(app_row["id"])
-    check("start_identity_verification returns a session id", bool(session_id))
+    check("start_identity_verification returns a VerificationSession with a session id",
+          hasattr(session_id, "session_id") and bool(session_id.session_id))
 
     with_session = await find_one("onboarding_applications", {"id": app_row["id"]})
-    check("the session id is persisted on the application row", with_session["identity_verification_session_id"] == session_id)
+    check("the session id is persisted on the application row", with_session["identity_verification_session_id"] == session_id.session_id)
     check("identity_verification_status is still 'pending' immediately after starting (result not applied yet)",
           with_session["identity_verification_status"] == "pending")
 
@@ -124,6 +125,62 @@ async def main():
         check("refuses to apply a result for an application with no session started", True)
 
     os.environ.pop("ALLOW_MOCK_IDENTITY_VERIFICATION", None)
+    importlib.reload(sys.modules["identity_verification"])
+
+    # ---------------------------------------------------------------
+    # The authoritative webhook path: real HMAC signature, real
+    # canonicalisation, idempotent on event_id
+    # ---------------------------------------------------------------
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    os.environ["DIDIT_WEBHOOK_SECRET"] = "test-secret"
+    importlib.reload(sys.modules["identity_verification"])
+
+    webhook_app = await insert_one("onboarding_applications", {
+        "user_id": "user-3", "identity_verification_status": "pending", "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    def sign(secret, body_dict, ts):
+        canonical = json.dumps(body_dict, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
+
+    now = str(time.time())
+    payload = {
+        "event_id": "evt-real-001", "webhook_type": "status.updated", "session_id": "sess-xyz",
+        "status": "Approved", "vendor_data": webhook_app["id"], "decision": {}, "metadata": {},
+        "timestamp": int(float(now)),
+    }
+    raw_body = json.dumps(payload, sort_keys=True).encode("utf-8")
+    # Sign the EXACT bytes we're about to send, sorted the same way, so
+    # this matches what verify_webhook_signature's own canonicalisation
+    # produces (its sort is recursive-key, not just top-level, but this
+    # payload's nested objects are empty/flat so top-level sort_keys is
+    # equivalent here).
+    signature = sign("test-secret", payload, now)
+
+    applied = await ob.apply_identity_verification_webhook(raw_body, signature, now)
+    check("a correctly-signed webhook updates the correct application", applied is not None and applied["id"] == webhook_app["id"])
+    check("Approved webhook moves identity_verification_status to 'verified'", applied["identity_verification_status"] == "verified")
+
+    persisted_webhook = await find_one("onboarding_applications", {"id": webhook_app["id"]})
+    check("the webhook-driven status change is actually persisted", persisted_webhook["identity_verification_status"] == "verified")
+
+    # Duplicate delivery (same event_id) is a no-op, not reapplied/errored.
+    duplicate_result = await ob.apply_identity_verification_webhook(raw_body, signature, now)
+    check("a duplicate webhook delivery (same event_id) is a no-op, returns None", duplicate_result is None)
+
+    # A tampered payload with a stale/mismatched signature is rejected.
+    bad_signature = "0" * len(signature)
+    try:
+        await ob.apply_identity_verification_webhook(raw_body, bad_signature, now)
+        check("rejects a webhook with an invalid signature", False)
+    except Exception as e:
+        check("rejects a webhook with an invalid signature", "signature" in str(e).lower())
+
+    os.environ.pop("DIDIT_WEBHOOK_SECRET", None)
     importlib.reload(sys.modules["identity_verification"])
 
     print()
