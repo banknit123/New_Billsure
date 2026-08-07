@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: billsure-pilot-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.pilot-api
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false          # set manually in Render dashboard -- a NEW sandbox project, never the live EasyBillsPay one
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: DIDIT_API_KEY
+        sync: false
+      - key: DIDIT_WORKFLOW_ID
+        sync: false
+      - key: DIDIT_WEBHOOK_SECRET
+        sync: false
+      - key: OBP_API_KEY
+        sync: false
+      - key: ALLOW_MOCK_IDENTITY_VERIFICATION
+        value: "false"        # keep false on any deployment reachable from the internet
+      - key: ALLOW_MOCK_BANK_VERIFICATION
+        value: "false"
