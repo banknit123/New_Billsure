@@ -100,6 +100,11 @@ PyJWT==2.13.0
 pyparsing==3.3.2
 pypdfium2==5.7.0
 pytest==9.1.1
+# pytesseract wraps the Tesseract OCR system binary (used by bill_ocr.py
+# for free, self-hosted scanned-bill extraction). Requires the
+# tesseract-ocr system package too (e.g. `apt-get install tesseract-ocr`)
+# -- pip alone is not enough, this only installs the Python wrapper.
+pytesseract==0.3.13
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.2
 python-jose==3.5.0
