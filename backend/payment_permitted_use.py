@@ -89,12 +89,19 @@ def validate_disbursement(req: DisbursementRequest) -> None:
         raise PermittedUseError("requested_amount exceeds the pilot's max single-bill payment limit — blocked")
 
 
-async def create_disbursement(req: DisbursementRequest, requested_by: str) -> dict:
+async def create_disbursement(req: DisbursementRequest, requested_by: str, credit_journal_id: Optional[str] = None) -> dict:
     """Validates and, only on success, records a disbursement AND
     immediately links it back to the bill (marking it as paid) in the
     same call — there is deliberately no window where a disbursement
     exists but the bill isn't yet marked disbursed, which is exactly the
-    kind of gap a duplicate-payment race would exploit."""
+    kind of gap a duplicate-payment race would exploit.
+
+    `credit_journal_id` is optional so this module still works standalone
+    (as it did before pilot_payment_flow.py existed) — but any caller
+    funding the disbursement from the credit ledger should pass the
+    journal id returned by credit_ledger.draw_credit(), so a
+    disbursement's funding source is always traceable back to the exact
+    ledger journal that moved the money, not just asserted."""
     validate_disbursement(req)
 
     disbursement = await sdb.insert_one("pilot_bill_disbursements", {
@@ -105,6 +112,7 @@ async def create_disbursement(req: DisbursementRequest, requested_by: str) -> di
         "payment_type": req.payment_type,
         "requested_by": requested_by,
         "status": "queued",
+        "credit_journal_id": credit_journal_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     await sdb.update_one("pilot_bill_submissions", {"id": req.bill_id}, {"disbursement_id": disbursement["id"]})
