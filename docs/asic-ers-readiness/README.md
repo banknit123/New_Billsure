@@ -29,131 +29,146 @@ Every control/document below is classified as one of:
 | Document | Status |
 |---|---|
 | `README.md` (this file) | Implemented and tested |
-| `control-matrix.md` | Partially implemented — reflects session 1 only; see Consolidation note below |
-| `readiness-scorecard.md` | Implemented and tested (scoring logic), reflects session 1 only — due for a refresh |
+| `control-matrix.md` | Partially implemented — reflects session 1 only; still due for a full rewrite across all 13 sessions (see Consolidation note) |
+| `readiness-scorecard.md` | Implemented and tested (scoring logic), reflects session 1 only — still due for a refresh |
 | `external-dependencies.md` | Implemented and tested |
 | `regulatory-assumptions.md` | Implemented and tested |
 | `change-log.md` | Implemented and tested, session 1 only |
-| `session-2-onboarding-and-responsible-lending.md` | Onboarding/eligibility + responsible-lending assessment (task sections 2–3) |
-| `session-3-bill-verification-and-permitted-use.md` | Bill verification + permitted-use payment blocking (task section 4) |
-| `session-4-credit-exposure-ledger.md` | pilot_config integrated into a new credit exposure sub-ledger (task section 8) |
-| `session-5-payment-flow-integration.md` | End-to-end payment flow joining verification, permitted-use, and the credit ledger |
-| `session-6-free-sandbox-verification-providers.md` | Free/sandbox OCR, KYC, and bank-verification provider adapters |
+| `session-2` through `session-13` (`*.md`) | One per session — see "What exists in code" below for the current summary of all of them |
+| `document-templates/` | 14 structural templates (session 11), no legal wording |
+| `runbooks/` | 6 operational runbooks (session 13) |
+| `security-and-privacy.md` | Filled in session 13 — per-item honest status table |
+| `incident-response.md` | Filled in session 13 — code + runbook exist, live drill not run |
+| `business-continuity.md` | Filled in session 13 — code + runbook exist, live test not run |
 | `current-state-assessment.md` | Not implemented yet |
 | `target-operating-model.md` | Not implemented yet |
 | `funds-flow.md` | Not implemented yet |
 | `system-architecture.md` | Not implemented yet |
-| `responsible-lending-workflow.md` | Superseded in practice by `session-2-...md` and `backend/responsible_lending.py`'s own docstrings — a dedicated policy-facing write-up under this exact filename is still not implemented |
+| `responsible-lending-workflow.md` | Superseded in practice by `session-2-...md` and `backend/responsible_lending.py`'s own docstrings |
 | `customer-funds-safeguarding.md` | Not implemented yet |
-| `reconciliation-process.md` | Not implemented yet (reconciliation.py exists from a prior session; this doc hasn't been written yet) |
-| `security-and-privacy.md` | Filled in session 13 — see the file for per-item status |
-| `incident-response.md` | Filled in session 13 — code + runbook exist, live drill not run |
-| `business-continuity.md` | Filled in session 13 — code + runbook exist, live test not run |
-| `wind-down-plan.md` | Not implemented yet |
-| `test-evidence.md` | Not implemented yet — the closest equivalent today is the "Test results" section in each session-N note, not yet consolidated |
+| `reconciliation-process.md` | Partially covered by `runbooks/reconciliation.md` (session 13); a dedicated process doc still not written |
+| `wind-down-plan.md` | Partially covered by `runbooks/wind-down.md` (session 13); a dedicated plan doc still not written |
+| `test-evidence.md` | Not consolidated — see the "Test suite summary" below for the current aggregate |
 
-## Consolidation note (post-merge, all 6 sessions)
+## Consolidation note (post-merge, all 13 sessions)
 
-PRs #3–#8 have all merged into `main`. `control-matrix.md`,
-`readiness-scorecard.md`, and `change-log.md` above still only reflect
-session 1 (launch gates + pilot config) — they have NOT yet been
-rewritten to incorporate sessions 2–6's controls, tests, and honest
+PRs #3–#8 and #10–#15 have all merged into `main` (PR #9 was closed,
+superseded by #10). `control-matrix.md`, `readiness-scorecard.md`, and
+`change-log.md` still only reflect session 1 — they have NOT yet been
+rewritten to incorporate sessions 2–13's controls, tests, and honest
 status. Until that rewrite happens, treat each `session-N-*.md` file as
 the authoritative record for that session's work, and the summary below
 as the best current single-page overview. A future session should fold
-all six sessions' control rows into one `control-matrix.md` and
+all thirteen sessions' control rows into one `control-matrix.md` and
 recompute `readiness-scorecard.md` against the full, current set of
-implemented modules rather than just session 1's two.
+implemented modules.
 
 ## What exists in code right now (all merged sessions)
 
-**Session 1 — regulatory launch gates + pilot config**
-- `backend/pilot_config.py` — versioned, validated pilot product
-  configuration with hard ceilings matching the ERS notification
-  (25 customers, $2,500 contractual limit, $62,500 aggregate cap, no
-  cash withdrawals, no customer transfers, 0% interest/fees, VIC-only,
-  electricity/gas/water/telco only).
-- `backend/launch_gates.py` — fail-closed regulatory launch-gate service.
-  All 22 mandatory gates default closed; production/new-lending is
-  blocked unless every gate is currently approved and unexpired; gate
-  approval requires a distinct reviewer from the evidence submitter;
-  full production activation requires two distinct approvers, neither
-  of whom requested the activation.
-- Migration 012.
+**Session 1 — regulatory launch gates + pilot config** (migration 012)
+`pilot_config.py`, `launch_gates.py`. Versioned pilot configuration with
+hard ceilings; fail-closed launch-gate service, 22 mandatory gates,
+two-person production activation.
 
-**Session 2 — onboarding/eligibility + responsible lending**
-- `backend/onboarding.py`, `backend/responsible_lending.py`,
-  migration 013. Deterministic eligibility rules — no opaque scoring.
-  Vulnerability/incomplete evidence always routes to manual review, not
-  auto-decline or auto-approve. Maker-checker on manual review AND on
-  final credit activation. Deterministic affordability assessment with
-  hardship-forced referral, override requiring a documented reason and
-  independent approver, and a guard preventing any automatic limit
-  increase without a fresh, passing reassessment.
+**Session 2 — onboarding + responsible lending** (migration 013)
+`onboarding.py`, `responsible_lending.py`. Deterministic eligibility, no
+opaque scoring; deterministic affordability assessment; maker-checker
+throughout.
 
-**Session 3 — bill verification + permitted-use blocking**
-- `backend/bill_verification.py`, `backend/payment_permitted_use.py`,
-  migration 014. Immutable SHA-256 bill hashing, objective-reject vs.
-  manual-review routing (never auto-resolving an ambiguous case either
-  way), and a fixed, non-overridable prohibited-payment-type list
-  checked before any amount logic runs.
+**Session 3 — bill verification + permitted-use blocking** (migration 014)
+`bill_verification.py`, `payment_permitted_use.py`. Immutable bill
+hashing; a fixed, non-overridable prohibited-payment-type list.
 
-**Session 4 — credit exposure ledger**
-- `backend/credit_ledger.py`, migration 015. A new, separate
-  double-entry credit sub-ledger (distinct from `ledger.py`'s existing
-  customer-trust ledger) where `pilot_config`'s numbers become real
-  enforcement: customer cap, aggregate exposure cap, single-bill and
-  outstanding-balance limits, and 70/80/90% warning thresholds — all
-  backed by database-level deferred-trigger enforcement too, not just
-  application code.
+**Session 4 — credit exposure ledger** (migration 015)
+`credit_ledger.py`. A separate double-entry credit sub-ledger where
+`pilot_config`'s numbers become real, DB-backed enforcement.
 
-**Session 5 — end-to-end payment flow**
-- `backend/pilot_payment_flow.py`, migration 016. Joins bill
-  verification, permitted-use checking, and the credit ledger into one
-  real payment path (`pay_verified_bill()`) with a strict ordering
-  guarantee: nothing downstream of a failed step ever happens, so a
-  blocked payment leaves zero side effects.
+**Session 5 — end-to-end payment flow** (migration 016)
+`pilot_payment_flow.py`. Joins verification, permitted-use, and the
+credit ledger with a strict no-partial-state ordering guarantee.
 
 **Session 6 — free/sandbox verification providers**
-- `backend/bill_ocr.py` — fully working, free, tested end to end
-  (pdfplumber + Tesseract OCR, no API key, no network call).
-- `backend/identity_verification.py` — Didit KYC sandbox adapter,
-  implemented against Didit's documented API but **unverified against a
-  live endpoint** (no credentials available when built) — fails closed,
-  with an explicitly gated mock path for local development.
-- `backend/bank_verification.py` — Open Bank Project sandbox adapter,
-  same caveat. Documents that real Australian bank verification needs
-  ACCC CDR accreditation regardless of vendor.
-- `backend/biller_allowlist.py` — 17 curated, BPAY-sourced Victorian
-  utility billers across all four approved categories.
+`bill_ocr.py` (fully working, free, real Tesseract/pdfplumber),
+`identity_verification.py`, `bank_verification.py`, `biller_allowlist.py`.
+
+**Session 7 — Didit contract fix + onboarding wiring** (migration 017)
+Corrected the Didit API contract against real documentation (auth
+header, `workflow_id`); wired `onboarding.py`'s real call site.
+
+**Session 8 — Didit webhook rebuild** (migration 018)
+Full rebuild against a confirmed integration reference: `url` field fix,
+all 10 real status literals, and — the structural addition — real,
+independently-verified HMAC webhook signature checking
+(`verify_webhook_signature()`), now the authoritative decision path.
+
+**Session 9 — repayments, hardship, collections** (migration 019)
+`hardship_collections.py`. No aggressive collections, no default fees
+(structurally absent from the schema), no automated adverse action.
+Hardship intake has zero payment-status gating, verified directly.
+
+**Session 10 — complaints / IDR / AFCA** (migration 020)
+`complaints.py`. Timeframes sourced from ASIC RG 271, not invented.
+AFCA has no public API (confirmed against their docs) — escalation is
+record-only. Maker-checker on any compensation remedy.
+
+**Session 11 — document versioning + acceptance** (migration 021)
+`document_versioning.py` + 14 structural templates (no legal wording).
+Reproducible customer acceptance with integrity verification; only
+material-change versions force re-acceptance.
+
+**Session 12 — audit trail + regulatory reporting** (migration 022)
+`audit_events.py`, `regulatory_reports.py`. Unified schema for
+login/security/admin-access/data-export events (other categories
+already had tables — documented gap, not consolidated). All 10 required
+report types as pure, PII-avoidant aggregation functions.
+
+**Session 13 — security + operational readiness** (migration 023)
+`security_controls.py`, `operational_readiness.py`. RBAC/least
+privilege, MFA gating, PII-safe logging (real redaction, tested against
+realistic phrasing), secure file-upload validation with magic-byte
+checking, sourced 7-year data-retention enforcement, health aggregation,
+feature flags, job-stall detection. Plus 6 runbooks and the filled-in
+`security-and-privacy.md`/`incident-response.md`/`business-continuity.md`.
 
 ## What this does NOT yet cover
 
-Full segregated-ledger integration beyond the credit sub-ledger (the
-original trust ledger and the credit ledger are not yet reconciled
-against each other), the remaining credit-limit/exposure monitoring
-wiring into a real scheduled job or admin dashboard, hardship/
-collections workflow (task section 9), complaints/AFCA (section 10),
-document versioning and acceptance (section 11), the full audit and
-regulatory-reporting exports (section 12), and most of the security/
-operational readiness items (sections 13–14). None of the modules built
-across sessions 1–6 are wired into a real API endpoint yet — every one
-is a tested, standalone module waiting on that integration step. See
+Nothing across all 13 sessions is wired into a real API endpoint —
+every module is tested and standalone, waiting on that integration
+step. No real malware scanner, MFA provider, or managed secret store is
+integrated (all are documented integration points). No live drills have
+been run for incident response or business continuity. The audit-table
+consolidation gap from session 12 remains open. See
 `external-dependencies.md` and each `session-N-*.md` file's own
 "Explicitly NOT done" section for specifics.
 
-## Test suite summary (all passing on `main` as of this merge)
+## Test suite summary (all 19 suites passing on `main` as of this merge)
 
 ```
-test_pilot_config_and_launch_gates.py            30 checks
-test_onboarding_and_responsible_lending.py        34 checks
-test_bill_verification_and_permitted_use.py       31 checks
-test_credit_ledger.py                             28 checks
-test_pilot_payment_flow.py                        18 checks
-test_bill_ocr.py                                  15 checks (real OCR/PDF extraction)
-test_identity_verification.py                      8 checks (fail-closed + gated mock)
-test_bank_verification.py                           6 checks (fail-closed + gated mock)
-test_biller_allowlist.py                          10 checks
-test_ledger_flow.py                          (pre-existing, unmodified)
-test_stripe_collections.py                   (pre-existing, unmodified)
+test_pilot_config_and_launch_gates.py                 30 checks
+test_onboarding_and_responsible_lending.py             34 checks
+test_bill_verification_and_permitted_use.py            31 checks
+test_credit_ledger.py                                  28 checks
+test_pilot_payment_flow.py                             18 checks
+test_bill_ocr.py                                       15 checks (real OCR/PDF extraction)
+test_identity_verification.py                           9 checks
+test_identity_verification_webhooks.py                 12 checks (real HMAC round trip)
+test_onboarding_identity_verification_wiring.py         13 checks
+test_bank_verification.py                                6 checks
+test_biller_allowlist.py                               10 checks
+test_hardship_collections.py                            30 checks
+test_complaints.py                                      32 checks
+test_document_versioning.py                             26 checks
+test_audit_events_and_regulatory_reports.py             32 checks
+test_security_controls.py                               33 checks
+test_operational_readiness.py                           16 checks
+test_ledger_flow.py                                (pre-existing, unmodified)
+test_stripe_collections.py                          (pre-existing, unmodified)
 ```
+
+Six real bugs were found and fixed by these tests during this
+workstream (not merely run to confirm expected behaviour): a bill-OCR
+reference-number regex, a cumulative-payment tracking bug in
+`hardship_collections.py`, a PII-redaction regex requiring adjacent
+BSB/account text, and three Didit API contract corrections (auth
+header, response field name, status literal coverage) across sessions
+7–8.
