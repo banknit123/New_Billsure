@@ -323,3 +323,62 @@ def record_consent(consents: dict, consent_type: str, version: str, accepted_at:
         "accepted_at": accepted_at or datetime.now(timezone.utc).isoformat(),
     }
     return updated
+
+
+# ---------------------------------------------------------------
+# Real identity-verification provider wiring (identity_verification.py).
+# This is the call site that turns identity_verification_status from a
+# caller-supplied field into something backed by an actual check.
+# Deliberately a thin wrapper: onboarding.py stays the source of truth
+# for the application record; identity_verification.py stays entirely
+# unaware that "onboarding applications" exist. Neither module imports
+# the other's data model, only this glue function does.
+# ---------------------------------------------------------------
+
+async def start_identity_verification(application_id: str) -> str:
+    """Starts a real (or, in explicitly-gated dev mode, mock) identity
+    verification session for an application and records the session
+    reference on it. Does NOT change identity_verification_status yet —
+    that only happens once a result comes back, via
+    apply_identity_verification_result(). Propagates
+    identity_verification.IdentityVerificationError untouched on failure
+    (e.g. no provider configured) rather than swallowing it — this
+    function must never leave an application looking verified when the
+    provider call actually failed."""
+    import identity_verification as idv
+
+    app = await sdb.find_one("onboarding_applications", {"id": application_id})
+    if not app:
+        raise OnboardingError(f"no application {application_id}")
+
+    session_id = await idv.start_verification_session(applicant_reference=application_id)
+    await sdb.update_one("onboarding_applications", {"id": application_id}, {"identity_verification_session_id": session_id})
+    await _append_audit(application_id, "identity_verification_started", app.get("user_id", "system"),
+                         f"provider session {session_id}", app, {"identity_verification_session_id": session_id})
+    return session_id
+
+
+async def apply_identity_verification_result(application_id: str) -> dict:
+    """Fetches the current result for the application's stored
+    verification session and updates identity_verification_status to
+    match. This is the only place identity_verification_status is
+    allowed to move from 'pending' to 'verified' or 'failed' once a real
+    session has been started — nothing else in this module writes that
+    field after start_identity_verification() has been called for an
+    application, so the provider's result is always the source of truth
+    from that point on."""
+    import identity_verification as idv
+
+    app = await sdb.find_one("onboarding_applications", {"id": application_id})
+    if not app:
+        raise OnboardingError(f"no application {application_id}")
+    session_id = app.get("identity_verification_session_id")
+    if not session_id:
+        raise OnboardingError(f"application {application_id} has no identity verification session started yet")
+
+    result = await idv.get_verification_result(session_id)
+    updates = {"identity_verification_status": result.status}
+    await sdb.update_one("onboarding_applications", {"id": application_id}, updates)
+    await _append_audit(application_id, "identity_verification_result_applied", "system",
+                         f"provider={result.provider} status={result.status}", app, updates)
+    return {**app, **updates}
