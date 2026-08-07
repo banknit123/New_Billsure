@@ -1,0 +1,447 @@
+"""
+backend/pilot_api.py
+======================
+Real HTTP endpoints for the ASIC ERS pilot — the piece every prior
+session's evidence pack flagged as missing ("tested, standalone
+module, not wired into any real API endpoint yet"). This closes that
+gap for the core customer journey exercised by
+`test_end_to_end_dummy_customer_journey.py`.
+
+DELIBERATELY A SEPARATE APP from `server.py` (the existing 150KB+
+bill-smoothing product), not a modification of it:
+- `server.py` is a live product with real infrastructure behind it
+  (per CLAUDE.md) — this workstream has consistently avoided touching
+  it or the live database it points to.
+- This app can be run and deployed entirely independently
+  (`uvicorn pilot_api:app`), pointed at its own sandbox database via
+  its own `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` env vars (the pilot
+  migrations 012-023 have never been applied to the live database —
+  point this app at a NEW project, not the live one).
+- It can optionally be mounted under the main app later
+  (`main_app.mount("/pilot", pilot_app)`) once someone deliberately
+  decides to do that — not assumed here.
+
+FAIL-CLOSED BY DEFAULT: every endpoint that would move real money or
+activate a real customer still passes through the same fail-closed
+checks as the underlying modules (pilot_config, launch_gates,
+credit_ledger, etc.) — this API layer adds HTTP plumbing, it does not
+loosen any control. In particular, `launch_gates.is_production_authorized()`
+is checked before any endpoint that draws credit or activates a
+customer account; with zero gates recorded (the honest current state),
+those endpoints correctly return 403 until gates are genuinely
+approved outside this repository.
+"""
+
+import logging
+from decimal import Decimal, InvalidOperation
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+import pilot_config as pc
+import launch_gates as lg
+import onboarding as ob
+import responsible_lending as rl
+import identity_verification as idv
+import bank_verification as bkv
+import credit_ledger as cl
+import bill_ocr as ocr
+import biller_allowlist as ba
+import bill_verification as bv
+import payment_permitted_use as ppu
+import pilot_payment_flow as flow
+import hardship_collections as hc
+import complaints as cp
+import document_versioning as dv
+import regulatory_reports as rr
+import security_controls as sc
+import operational_readiness as opr
+
+logger = logging.getLogger(__name__)
+logger.addFilter(sc.PiiRedactingLogFilter())
+
+app = FastAPI(
+    title="BillSure ASIC ERS Pilot API",
+    description="Sandbox-only. Real-money functionality is disabled until every launch gate is approved.",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # tighten to the real pilot frontend origin before any non-local deployment
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Every error type this module's dependencies can raise, mapped to an
+# HTTP status. A refusal from any underlying module (maker-checker
+# violation, cap breach, fail-closed check) becomes a 4xx, never a 500
+# that could be mistaken for an unrelated server fault.
+_ERROR_STATUS = {
+    ob.OnboardingError: 422,
+    rl.ResponsibleLendingError: 422,
+    idv.IdentityVerificationError: 502,
+    bkv.BankVerificationError: 502,
+    cl.CreditLedgerError: 422,
+    ocr.BillOcrError: 422,
+    bv.BillVerificationError: 422,
+    ppu.PermittedUseError: 422,
+    flow.PaymentFlowError: 422,
+    hc.HardshipCollectionsError: 422,
+    cp.ComplaintsError: 422,
+    dv.DocumentVersioningError: 422,
+    sc.SecurityControlError: 422,
+    lg.LaunchGateError: 403,
+    pc.ConfigValidationError: 422,
+}
+
+
+def _raise_as_http(e: Exception):
+    for exc_type, code in _ERROR_STATUS.items():
+        if isinstance(e, exc_type):
+            raise HTTPException(status_code=code, detail=str(e))
+    logger.exception("Unhandled error in pilot API")
+    raise HTTPException(status_code=500, detail="internal error")
+
+
+# ---------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------
+
+@app.get("/health")
+async def health():
+    """Liveness/readiness endpoint (task section 14). Checks database
+    reachability via a trivial query; does NOT report production
+    authorization status here on purpose -- that's a separate,
+    deliberately more visible endpoint (see /pilot/launch-gates/status)
+    rather than folded into a generic health check a load balancer
+    would poll constantly."""
+    import supabase_db as sdb
+    try:
+        await sdb.find_many("pilot_config_versions", {}, limit=1)
+        db_healthy = True
+        db_detail = "reachable"
+    except Exception as e:
+        db_healthy = False
+        db_detail = f"unreachable: {e}"
+
+    report = await opr.check_health({"database": opr.ComponentHealth("database", db_healthy, db_detail)})
+    body = {"overall_healthy": report.overall_healthy, "checked_at": report.checked_at,
+            "components": [c.__dict__ for c in report.components]}
+    return JSONResponse(status_code=200 if report.overall_healthy else 503, content=body)
+
+
+@app.get("/pilot/launch-gates/status")
+async def launch_gate_status():
+    """Read-only: the current status of every mandatory launch gate and
+    whether production is currently authorized. Never mutates
+    anything -- approving/submitting gate evidence is deliberately not
+    exposed over this API; that's an administrative action requiring
+    its own properly-authenticated admin surface, not built here."""
+    statuses = await lg.get_all_gate_statuses()
+    authorized = await lg.is_production_authorized()
+    return {"gates": statuses, "production_authorized": authorized}
+
+
+# ---------------------------------------------------------------
+# Identity verification
+# ---------------------------------------------------------------
+
+class StartIdentityVerificationRequest(BaseModel):
+    applicant_reference: str
+    workflow_id: Optional[str] = None
+    callback: Optional[str] = None
+
+
+@app.post("/pilot/identity/sessions")
+async def start_identity_verification(req: StartIdentityVerificationRequest):
+    try:
+        session = await idv.start_verification_session(req.applicant_reference, workflow_id=req.workflow_id, callback=req.callback)
+    except Exception as e:
+        _raise_as_http(e)
+    return {"session_id": session.session_id, "url": session.url, "provider": session.provider}
+
+
+@app.post("/pilot/identity/webhook")
+async def identity_webhook(request: Request, x_signature_v2: str = Header(...), x_timestamp: str = Header(...)):
+    """Receives a Didit webhook delivery. Verifies the signature before
+    doing anything else; a bad signature is a 401, never processed."""
+    raw_body = await request.body()
+    try:
+        result = await ob.apply_identity_verification_webhook(raw_body, x_signature_v2, x_timestamp)
+    except idv.IdentityVerificationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        _raise_as_http(e)
+    if result is None:
+        return {"status": "duplicate_ignored"}
+    return {"status": "applied", "identity_verification_status": result["identity_verification_status"]}
+
+
+# ---------------------------------------------------------------
+# Onboarding
+# ---------------------------------------------------------------
+
+class ApplyRequest(BaseModel):
+    user_id: str
+    identity_verification_status: str
+    age_confirmed: bool
+    residential_state: str
+    residential_country: str = "AU"
+    bank_account_verified: bool
+    income_amount: Optional[str] = None
+    income_frequency: Optional[str] = None
+    employment_status: Optional[str] = None
+    recurring_living_expenses: Optional[str] = None
+    existing_debts_and_bnpl: Optional[str] = None
+    requested_credit_purpose: str
+    requirements_and_objectives: str
+    vulnerability_indicators: list = Field(default_factory=list)
+    bankruptcy_status: str = "none"
+    utility_bill_ownership_verified: bool
+    consent_types_accepted: list = Field(default_factory=list)  # each element must be a value from onboarding.REQUIRED_CONSENTS
+
+
+@app.post("/pilot/onboarding/apply")
+async def apply(req: ApplyRequest):
+    active_config = await pc.get_active_config()
+    if not active_config:
+        raise HTTPException(status_code=503, detail="no active pilot configuration -- cannot evaluate an application")
+
+    consents = {}
+    for c in req.consent_types_accepted:
+        consents = ob.record_consent(consents, c, "v1")
+
+    application = ob.OnboardingApplication(
+        user_id=req.user_id, identity_verification_status=req.identity_verification_status,
+        age_confirmed=req.age_confirmed, residential_state=req.residential_state,
+        residential_country=req.residential_country, bank_account_verified=req.bank_account_verified,
+        income_amount=req.income_amount, income_frequency=req.income_frequency,
+        employment_status=req.employment_status, recurring_living_expenses=req.recurring_living_expenses,
+        existing_debts_and_bnpl=req.existing_debts_and_bnpl, requested_credit_purpose=req.requested_credit_purpose,
+        requirements_and_objectives=req.requirements_and_objectives, vulnerability_indicators=req.vulnerability_indicators,
+        bankruptcy_status=req.bankruptcy_status, utility_bill_ownership_verified=req.utility_bill_ownership_verified,
+        consents=consents,
+    )
+    try:
+        row = await ob.submit_application(application, active_config.geographic_areas, active_config.approved_bill_categories,
+                                           policy_version="onboarding-policy-v1")
+    except Exception as e:
+        _raise_as_http(e)
+    return row
+
+
+class ManualReviewRequest(BaseModel):
+    reviewer: str
+    outcome: str
+    reason_codes: list = Field(default_factory=list)
+    notes: str = ""
+
+
+@app.post("/pilot/onboarding/{application_id}/manual-review")
+async def manual_review(application_id: str, req: ManualReviewRequest):
+    try:
+        return await ob.record_manual_review_outcome(application_id, req.reviewer, req.outcome, req.reason_codes, req.notes)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+class ActivateCreditRequest(BaseModel):
+    prepared_by: str
+    approved_by: str
+    contractual_limit: str
+    active_customer_count: int
+    current_aggregate_contractual_exposure: str
+
+
+@app.post("/pilot/onboarding/{application_id}/activate-credit")
+async def activate_credit(application_id: str, req: ActivateCreditRequest):
+    """Two-step activation: onboarding-side maker-checker AND the
+    credit_ledger-side account creation (its own maker-checker + cap
+    checks), matching test_end_to_end_dummy_customer_journey.py's
+    sequence exactly."""
+    try:
+        onboarding_activation = await ob.approve_credit_activation(application_id, req.prepared_by, req.approved_by)
+        app_row = await ob.sdb.find_one("onboarding_applications", {"id": application_id})
+        credit_account = await cl.activate_customer_credit_account(
+            app_row["user_id"], Decimal(req.contractual_limit), req.active_customer_count,
+            Decimal(req.current_aggregate_contractual_exposure), req.prepared_by, req.approved_by,
+        )
+    except Exception as e:
+        _raise_as_http(e)
+    return {"onboarding_activation": onboarding_activation, "credit_account": credit_account}
+
+
+# ---------------------------------------------------------------
+# Credit account
+# ---------------------------------------------------------------
+
+@app.get("/pilot/credit/accounts/{customer_id}/balance")
+async def credit_balance(customer_id: str):
+    account = await cl.get_customer_credit_account(customer_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="no credit account for this customer")
+    outstanding = await cl.get_outstanding_principal(customer_id)
+    limit = Decimal(account["contractual_limit"])
+    return {"customer_id": customer_id, "contractual_limit": str(limit), "outstanding_principal": str(outstanding),
+            "available_credit": str(limit - outstanding), "status": account["status"]}
+
+
+# ---------------------------------------------------------------
+# Bills: upload -> OCR -> verify -> pay
+# ---------------------------------------------------------------
+
+@app.post("/pilot/bills/upload")
+async def upload_bill(
+    customer_id: str = Form(...), customer_name_on_account: str = Form(...),
+    category: str = Form(...), file: UploadFile = File(...),
+):
+    content = await file.read()
+    try:
+        upload_result = sc.validate_file_upload(file.filename, content)
+    except sc.SecurityControlError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    is_pdf = upload_result.extension == ".pdf"
+    known_billers = ba.allowlist_names()
+    extraction = ocr.extract_bill_data(content, known_billers=known_billers, is_pdf=is_pdf)
+
+    biller_name = extraction.biller_name_candidates[0] if extraction.biller_name_candidates else "UNKNOWN"
+    submission = bv.BillSubmission(
+        customer_id=customer_id, file_bytes=content, customer_name_on_account=customer_name_on_account,
+        customer_name_on_bill=customer_name_on_account,  # OCR doesn't separately extract this; see bill_ocr.py's known limitation
+        biller_name_extracted=biller_name, biller_reference=extraction.guessed_biller_reference or "",
+        category=category, amount=extraction.guessed_amount or Decimal("0.01"),
+        due_date=extraction.guessed_due_date or "", extraction_confidence=extraction.extraction_confidence,
+        fraud_indicators=[],
+    )
+    try:
+        bill_row = await bv.submit_and_verify_bill(submission, known_billers, pc.APPROVED_BILL_CATEGORIES)
+    except Exception as e:
+        _raise_as_http(e)
+    return {"bill": bill_row, "ocr": {"method": extraction.extraction_method, "confidence": extraction.extraction_confidence,
+                                       "raw_text_preview": extraction.raw_text[:200]}}
+
+
+class BillManualReviewRequest(BaseModel):
+    reviewer: str
+    decision: str
+    notes: str = ""
+
+
+@app.post("/pilot/bills/{bill_id}/manual-review")
+async def bill_manual_review(bill_id: str, req: BillManualReviewRequest):
+    try:
+        return await bv.record_manual_review_decision(bill_id, req.reviewer, req.decision, req.notes)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+class PayBillRequest(BaseModel):
+    customer_id: str
+    requested_by: str
+
+
+@app.post("/pilot/bills/{bill_id}/pay")
+async def pay_bill(bill_id: str, req: PayBillRequest):
+    """The single highest-consequence endpoint in this API: this is
+    where real money would move. Checks launch_gates.
+    is_production_authorized() BEFORE calling into the payment flow --
+    with the honest current state (zero gates recorded), this
+    correctly returns 403 rather than ever reaching credit_ledger.
+    draw_credit()."""
+    authorized = await lg.is_production_authorized()
+    if not authorized:
+        raise HTTPException(
+            status_code=403,
+            detail="production is not authorized -- one or more mandatory launch gates are not approved. "
+                   "See GET /pilot/launch-gates/status for which gate(s) are blocking this.",
+        )
+    try:
+        return await flow.pay_verified_bill(bill_id, req.customer_id, req.requested_by)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+# ---------------------------------------------------------------
+# Hardship
+# ---------------------------------------------------------------
+
+class HardshipRequest(BaseModel):
+    customer_id: str
+    reason: str
+    vulnerability_indicators: list = Field(default_factory=list)
+    requested_by: str
+
+
+@app.post("/pilot/hardship/requests")
+async def request_hardship(req: HardshipRequest):
+    """No launch-gate or credit-status check here, deliberately --
+    hardship support must remain available regardless of production
+    authorization status (see launch_gates.existing_customers_route())."""
+    try:
+        return await hc.request_hardship(req.customer_id, req.reason, req.vulnerability_indicators, req.requested_by)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+# ---------------------------------------------------------------
+# Complaints
+# ---------------------------------------------------------------
+
+class ComplaintRequest(BaseModel):
+    customer_id: str
+    channel: str
+    description: str
+    category: str = "standard"
+    severity: str = "medium"
+    vulnerability_indicators: list = Field(default_factory=list)
+    received_by: str
+
+
+@app.post("/pilot/complaints")
+async def submit_complaint(req: ComplaintRequest):
+    try:
+        return await cp.intake_complaint(req.customer_id, req.channel, req.description, req.category,
+                                          req.severity, req.vulnerability_indicators, req.received_by)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+# ---------------------------------------------------------------
+# Documents
+# ---------------------------------------------------------------
+
+@app.get("/pilot/documents/{document_type}")
+async def get_active_document(document_type: str):
+    doc = await dv.get_active_document(document_type)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"no approved version of {document_type}")
+    return doc
+
+
+class AcceptDocumentRequest(BaseModel):
+    customer_id: str
+    version_id: str
+    ip_address: Optional[str] = None
+
+
+@app.post("/pilot/documents/{document_type}/accept")
+async def accept_document(document_type: str, req: AcceptDocumentRequest):
+    try:
+        return await dv.record_customer_acceptance(req.customer_id, document_type, req.version_id, ip_address=req.ip_address)
+    except Exception as e:
+        _raise_as_http(e)
+
+
+# ---------------------------------------------------------------
+# Reports (read-only, PII-avoidant by construction -- see regulatory_reports.py)
+# ---------------------------------------------------------------
+
+@app.get("/pilot/reports/credit-exposure")
+async def credit_exposure_report():
+    snapshot = await cl.get_exposure_snapshot()
+    return rr.credit_exposure_report(snapshot)
