@@ -1,0 +1,23 @@
+# Minimal requirements for backend/pilot_api.py and everything it
+# imports (pilot_config, launch_gates, onboarding, responsible_lending,
+# identity_verification, bank_verification, credit_ledger, bill_ocr,
+# biller_allowlist, bill_verification, payment_permitted_use,
+# pilot_payment_flow, hardship_collections, complaints,
+# document_versioning, regulatory_reports, security_controls,
+# operational_readiness, supabase_db).
+#
+# Deliberately NOT the full backend/requirements.txt (150+ packages for
+# the separate bill-smoothing product, including a dependency pinned to
+# a private asset host that this service has no need to depend on).
+# Also requires the tesseract-ocr SYSTEM package (see Dockerfile.pilot-api)
+# -- pip alone does not install it.
+
+fastapi==0.138.2
+uvicorn==0.25.0
+python-multipart==0.0.32
+pydantic==2.12.0
+httpx==0.28.1
+supabase==2.31.0
+pdfplumber==0.11.9
+pytesseract==0.3.13
+pillow==12.2.0
