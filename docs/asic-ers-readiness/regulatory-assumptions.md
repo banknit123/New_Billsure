@@ -13,7 +13,10 @@ concrete artefact to confirm, correct, or reject.
   verified household utility bills (electricity, gas, water,
   telecommunications) to a verified Australian biller.
 - Contractual credit limit AUD 2,500 per customer; initial available
-  credit AUD 300–500; maximum single bill payment AUD 500; maximum
+  credit AUD 300–500; maximum single bill payment **AUD 1,500** (raised
+  from the original AUD 500 — see `change-log.md` and `session-19-
+  single-bill-limit-increase.md` for the record of this change and its
+  caveats); maximum
   outstanding balance AUD 2,500 per customer; aggregate contractual
   exposure across all pilot customers AUD 62,500 (= 25 customers ×
   $2,500).
@@ -49,6 +52,18 @@ concrete artefact to confirm, correct, or reject.
 
 ## Open questions for actual legal review
 
+- **Whether the AUD 1,500 max single-bill payment (raised from AUD 500
+  in session 19) is consistent with whatever was actually lodged in
+  BillSure's ASIC ERS notification, if one has already been
+  submitted.** This figure was originally set in the very first task
+  brief this workstream was built from, without this repository having
+  visibility into the actual notification document's content. Raised
+  based on a business observation (winter utility bills routinely
+  exceed $500 for larger households), directed by whoever requested the
+  change — but the consistency check against the real ASIC filing is
+  explicitly outside what this codebase or this session can verify.
+  Confirm with whoever manages the ASIC relationship before treating
+  this as final.
 - Whether AUD 2,500 with a 12-month term and 0% interest/fees falls
   within the intended ERS credit-activities exemption's numerical and
   product-type limits as currently understood, or whether the exemption
