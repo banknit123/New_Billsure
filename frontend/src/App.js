@@ -9,6 +9,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import LandingPage from './pages/LandingPage';
 import LegalPage from './pages/LegalPage';
 import ForgotPassword from './pages/ForgotPassword';
+import AsicPilotConsole from './pages/AsicPilotConsole';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import CookieConsentBanner from './components/CookieConsentBanner';
 
@@ -82,6 +83,12 @@ function App() {
           />
           <Route path="/legal/:section" element={<LegalPage />} />
           <Route path="/forgot-password" element={user ? <Navigate to="/dashboard" /> : <ForgotPassword />} />
+          {/* ASIC ERS pilot testing console -- deliberately independent of
+              the `user` auth state above (its own separate API-key auth,
+              its own separate sandbox backend/database). See
+              src/pages/AsicPilotConsole.jsx's own header comment for the
+              full context and the deployment-domain caveat. */}
+          <Route path="/asic-pilot" element={<AsicPilotConsole />} />
         </Routes>
         <Toaster richColors />
         <PWAInstallPrompt />
