@@ -46,6 +46,38 @@ def make_synthetic_pdf_bill() -> bytes:
     return buf.getvalue()
 
 
+def make_synthetic_pdf_bill_with_decoys() -> bytes:
+    """Reconstructs the exact structure of a REAL bill (an EnergyAustralia
+    gas bill) that was found live to trip up the original amount/date
+    extraction: a genuine 'Amount due $303.38' and 'Bill due date
+    25 Feb 2025', PLUS an unrelated '$10,000' card-payment-limit
+    disclaimer (larger than the real amount) and an unrelated numeric
+    '27/11/2024' billing-period date (appearing before the real due date
+    in the document, and in a format the old date regex would match but
+    the real due date's month-name format would not)."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "EnergyAustralia")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 760, "Your gas account")
+    c.drawString(50, 730, "Account number: 2773934108")
+    c.drawString(50, 700, "Your bill")
+    c.drawString(50, 670, "Amount due")
+    c.drawString(50, 650, "$303.38")
+    c.drawString(50, 620, "Bill due date")
+    c.drawString(50, 600, "25 Feb 2025")
+    c.drawString(50, 560, "Gas payment options")
+    c.drawString(50, 540, "Call 1300 559 873 to pay by MasterCard, Visa")
+    c.drawString(50, 520, "or American Express for payment amounts up to $10,000.")
+    c.drawString(50, 480, "Energy charges")
+    c.drawString(50, 460, "Balance Plan (Home)")
+    c.drawString(50, 440, "27/11/2024 - 05/02/2025 - 71 Days")
+    c.drawString(50, 420, "Total current charges (incl. GST of $27.58) $303.38")
+    c.save()
+    return buf.getvalue()
+
+
 def make_blank_pdf() -> bytes:
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)
@@ -86,6 +118,21 @@ def main():
     check("PDF extraction correctly parsed the due date", result.guessed_due_date == "15/09/2026")
     check("PDF extraction correctly parsed the reference number", result.guessed_biller_reference == "REF-99123")
     check("PDF extraction correctly identified the known biller by name match", "AusNet Electricity" in result.biller_name_candidates)
+
+    # ---------------------------------------------------------------
+    # Real bug, found live: a real bill's "$10,000" card-payment-limit
+    # disclaimer and an unrelated "27/11/2024" billing-period date were
+    # picked up instead of the real amount ($303.38) and real due date
+    # (25 Feb 2025, month-name format). This reconstructs that exact
+    # document structure -- a genuine regression test for a genuine
+    # production bug, not a hypothetical.
+    # ---------------------------------------------------------------
+    decoy_pdf_bytes = make_synthetic_pdf_bill_with_decoys()
+    decoy_result = ocr.extract_bill_data(decoy_pdf_bytes, known_billers={"EnergyAustralia"}, is_pdf=True)
+    check("real-bug regression: amount is the genuine $303.38, NOT the $10,000 payment-limit decoy",
+          decoy_result.guessed_amount == Decimal("303.38"))
+    check("real-bug regression: due date is the genuine '25 Feb 2025' (month-name format), NOT the '27/11/2024' billing-period decoy",
+          decoy_result.guessed_due_date == "25 Feb 2025")
 
     # ---------------------------------------------------------------
     # A PDF with no text layer at all -> confidence 0, method 'none',
