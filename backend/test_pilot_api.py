@@ -81,6 +81,12 @@ import pilot_auth as pa    # noqa: E402
 
 FAILURES = []
 
+# Real UUIDs -- every customer_id/user_id column in the pilot schema is
+# UUID-typed (migrations 013-021); this test now proves the fix that
+# followed from finding that gap during live deployment testing.
+JANE_UUID = str(uuid.uuid4())
+OTHER_CUSTOMER_UUID = str(uuid.uuid4())
+
 
 def check(label, condition):
     status = "PASS" if condition else "FAIL"
@@ -122,7 +128,7 @@ async def main():
     # ---------------------------------------------------------------
     # Issue API keys for each role, exactly as an operator would
     # ---------------------------------------------------------------
-    customer_key = await pa.issue_api_key("user-http-jane-001", "customer", issued_by="ops_lead")
+    customer_key = await pa.issue_api_key(JANE_UUID, "customer", issued_by="ops_lead")
     case_worker_key = await pa.issue_api_key("case_worker_1", "case_worker", issued_by="ops_lead")
     compliance_key = await pa.issue_api_key("compliance_lead", "compliance_reviewer", issued_by="ops_lead", mfa_verified=True)
     admin_key_no_mfa = await pa.issue_api_key("admin_no_mfa", "admin", issued_by="ops_lead", mfa_verified=False)
@@ -159,7 +165,7 @@ async def main():
     # Wrong role for the endpoint -> 403, not a silent pass-through
     # ---------------------------------------------------------------
     apply_payload = {
-        "user_id": "user-http-jane-001", "identity_verification_status": "verified",
+        "user_id": JANE_UUID, "identity_verification_status": "verified",
         "age_confirmed": True, "residential_state": "VIC", "bank_account_verified": True,
         "income_amount": "5200", "income_frequency": "monthly", "employment_status": "full_time",
         "recurring_living_expenses": "2800", "existing_debts_and_bnpl": "0",
@@ -202,15 +208,15 @@ async def main():
     activation = resp.json()
     check("credit account is active over authenticated HTTP", activation["credit_account"]["status"] == "active")
 
-    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(customer_key.raw_key))
+    resp = client.get(f"/pilot/credit/accounts/{JANE_UUID}/balance", headers=auth(customer_key.raw_key))
     check("a customer CAN view their OWN balance", resp.status_code == 200)
     check("balance is correct", resp.json()["outstanding_principal"] == "0.00")
 
-    other_customer_key = await pa.issue_api_key("some-other-customer", "customer", issued_by="ops_lead")
-    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(other_customer_key.raw_key))
+    other_customer_key = await pa.issue_api_key(OTHER_CUSTOMER_UUID, "customer", issued_by="ops_lead")
+    resp = client.get(f"/pilot/credit/accounts/{JANE_UUID}/balance", headers=auth(other_customer_key.raw_key))
     check("a DIFFERENT customer CANNOT view Jane's balance (403, not leaked)", resp.status_code == 403)
 
-    resp = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(case_worker_key.raw_key))
+    resp = client.get(f"/pilot/credit/accounts/{JANE_UUID}/balance", headers=auth(case_worker_key.raw_key))
     check("a case_worker CAN view any customer's balance (staff permission, not 'own data')", resp.status_code == 200)
 
     # ---------------------------------------------------------------
@@ -220,14 +226,14 @@ async def main():
 
     resp = client.post(
         "/pilot/bills/upload",
-        data={"customer_id": "user-http-jane-001", "customer_name_on_account": "Jane Dummy", "category": "electricity"},
+        data={"customer_id": JANE_UUID, "customer_name_on_account": "Jane Dummy", "category": "electricity"},
         files={"file": ("bill.png", bill_bytes, "image/png")},
     )
     check("bill upload with no auth is refused (401)", resp.status_code == 401)
 
     resp = client.post(
         "/pilot/bills/upload",
-        data={"customer_id": "user-http-jane-001", "customer_name_on_account": "Jane Dummy", "category": "electricity"},
+        data={"customer_id": JANE_UUID, "customer_name_on_account": "Jane Dummy", "category": "electricity"},
         files={"file": ("bill.png", bill_bytes, "image/png")},
         headers=auth(customer_key.raw_key),
     )
@@ -244,29 +250,29 @@ async def main():
     # Payment: requires 'process_payment' AND is still blocked by
     # launch_gates regardless of who's asking
     # ---------------------------------------------------------------
-    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": "user-http-jane-001", "requested_by": "payments_admin_1"},
+    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": JANE_UUID, "requested_by": "payments_admin_1"},
                         headers=auth(customer_key.raw_key))
     check("a customer key is refused (403) from paying a bill -- least privilege, before even reaching launch_gates", resp.status_code == 403)
 
-    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": "user-http-jane-001", "requested_by": "payments_admin_1"},
+    resp = client.post(f"/pilot/bills/{bill_id}/pay", json={"customer_id": JANE_UUID, "requested_by": "payments_admin_1"},
                         headers=auth(admin_key.raw_key))
     check("an authorized, MFA-verified admin key STILL gets blocked (403) by launch_gates -- auth passing doesn't bypass the regulatory gate",
           resp.status_code == 403 and "launch gate" in resp.json()["detail"])
 
-    balance_after_blocked_attempt = client.get("/pilot/credit/accounts/user-http-jane-001/balance", headers=auth(customer_key.raw_key)).json()
+    balance_after_blocked_attempt = client.get(f"/pilot/credit/accounts/{JANE_UUID}/balance", headers=auth(customer_key.raw_key)).json()
     check("a blocked payment attempt over authenticated HTTP still moves zero money", balance_after_blocked_attempt["outstanding_principal"] == "0.00")
 
     # ---------------------------------------------------------------
     # Hardship and complaints: reachable by a customer key
     # ---------------------------------------------------------------
     resp = client.post("/pilot/hardship/requests", json={
-        "customer_id": "user-http-jane-001", "reason": "reduced hours at work",
-        "vulnerability_indicators": [], "requested_by": "user-http-jane-001",
+        "customer_id": JANE_UUID, "reason": "reduced hours at work",
+        "vulnerability_indicators": [], "requested_by": JANE_UUID,
     }, headers=auth(customer_key.raw_key))
     check("an authenticated customer can request hardship", resp.status_code == 200 and resp.json()["status"] == "open")
 
     resp = client.post("/pilot/complaints", json={
-        "customer_id": "user-http-jane-001", "channel": "web_form", "description": "Test complaint over HTTP",
+        "customer_id": JANE_UUID, "channel": "web_form", "description": "Test complaint over HTTP",
         "category": "standard", "severity": "low", "received_by": "agent1",
     }, headers=auth(customer_key.raw_key))
     check("an authenticated customer can submit a complaint", resp.status_code == 200)
@@ -287,6 +293,34 @@ async def main():
     resp = client.get("/pilot/reports/credit-exposure", headers=auth(admin_key.raw_key))
     check("an admin key can access the reports endpoint", resp.status_code == 200)
     check("credit exposure report shows the 1 activated customer over authenticated HTTP", resp.json()["active_customer_count"] == 1)
+
+    # ---------------------------------------------------------------
+    # UUID validation: a non-UUID customer/user id is a clear 422, never
+    # a bare 500. Found live during initial deployment testing -- a
+    # plain string id ("user-live-test-001") reached the real Postgres
+    # UUID column, was rejected by the database with an opaque error,
+    # and surfaced through this API's generic exception handler as an
+    # unhelpful "internal error" (500). This is the regression test for
+    # the fix: reject it at the API boundary instead, with a message
+    # that names the exact field.
+    # ---------------------------------------------------------------
+    bad_apply_payload = {**{k: v for k, v in {
+        "user_id": "not-a-real-uuid", "identity_verification_status": "verified",
+        "age_confirmed": True, "residential_state": "VIC", "bank_account_verified": True,
+        "requested_credit_purpose": "electricity", "requirements_and_objectives": "test",
+        "utility_bill_ownership_verified": True, "consent_types_accepted": [],
+    }.items()}}
+    resp = client.post("/pilot/onboarding/apply", json=bad_apply_payload, headers=auth(customer_key.raw_key))
+    check("a non-UUID user_id is rejected with 422, not a bare 500 internal error", resp.status_code == 422)
+    check("the 422 error names the specific field that's invalid", "user_id" in str(resp.json()))
+
+    resp = client.get("/pilot/credit/accounts/not-a-real-uuid/balance", headers=auth(admin_key.raw_key))
+    check("a non-UUID customer_id in a path parameter is also rejected with 422, not 500", resp.status_code == 422)
+
+    resp = client.post("/pilot/hardship/requests", json={
+        "customer_id": "also-not-a-uuid", "reason": "test", "vulnerability_indicators": [], "requested_by": "test",
+    }, headers=auth(customer_key.raw_key))
+    check("a non-UUID customer_id in hardship requests is rejected with 422", resp.status_code == 422)
 
     print()
     if FAILURES:
