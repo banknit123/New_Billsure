@@ -45,13 +45,14 @@ a public product.
 """
 
 import logging
+import os
 import uuid as uuid_module
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel, Field, field_validator
 
 import pilot_config as pc
@@ -89,6 +90,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_CONSOLE_HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pilot_console.html")
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/console", include_in_schema=False)
+async def pilot_console():
+    """Serves the sandbox testing console -- a real browser UI over this
+    API, not just the JSON responses or the developer-facing /docs page.
+    Talks to whatever origin it's loaded from (window.location.origin in
+    the page's own JS), so it works identically whether reached via the
+    raw onrender.com URL or the custom domain. The API key is entered
+    once and kept only in this browser's localStorage -- never sent
+    anywhere except back to this same API as the Authorization header on
+    each request the person triggers by clicking a button."""
+    return FileResponse(_CONSOLE_HTML_PATH, media_type="text/html")
+
 
 # Every error type this module's dependencies can raise, mapped to an
 # HTTP status. A refusal from any underlying module (maker-checker
