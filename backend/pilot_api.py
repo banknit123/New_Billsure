@@ -45,13 +45,14 @@ a public product.
 """
 
 import logging
+import uuid as uuid_module
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import pilot_config as pc
 import launch_gates as lg
@@ -118,6 +119,27 @@ def _raise_as_http(e: Exception):
             raise HTTPException(status_code=code, detail=str(e))
     logger.exception("Unhandled error in pilot API")
     raise HTTPException(status_code=500, detail="internal error")
+
+
+def _validate_uuid_field(value: str, field_name: str) -> str:
+    """Every customer_id/user_id column across the pilot schema is
+    typed UUID (see migrations 013-021) — Postgres rejects a non-UUID
+    string with an opaque error that this API's generic exception
+    handler would otherwise surface as an unhelpful 500. Validates at
+    the API boundary instead, so a malformed id is a clear 422 naming
+    exactly which field is wrong, not a mystery internal error.
+
+    Found live during initial deployment testing: this exact gap
+    produced a bare 'internal error' when a plain string id
+    ('user-live-test-001') was submitted instead of a real UUID — no
+    automated test caught it beforehand because the in-memory fake
+    database used throughout this workstream's test suites never
+    enforces Postgres column types the way the real database does."""
+    try:
+        uuid_module.UUID(str(value))
+    except (ValueError, AttributeError, TypeError):
+        raise ValueError(f"{field_name} must be a valid UUID (the pilot database requires it) — got: {value!r}")
+    return value
 
 
 # ---------------------------------------------------------------
@@ -257,6 +279,11 @@ class ApplyRequest(BaseModel):
     utility_bill_ownership_verified: bool
     consent_types_accepted: list = Field(default_factory=list)  # each element must be a value from onboarding.REQUIRED_CONSENTS
 
+    @field_validator("user_id")
+    @classmethod
+    def validate_user_id(cls, v):
+        return _validate_uuid_field(v, "user_id")
+
 
 @app.post("/pilot/onboarding/apply")
 async def apply(req: ApplyRequest, actor: dict = Depends(require("submit_application"))):
@@ -338,6 +365,11 @@ async def credit_balance(customer_id: str, actor: dict = Depends(get_current_act
     checked here since it depends on the path parameter, not a static
     permission); staff/system roles with 'view_customer_balances' may
     view any customer's balance."""
+    try:
+        _validate_uuid_field(customer_id, "customer_id")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     is_own_data = actor["actor_id"] == customer_id and sc.has_permission(actor["role"], "view_own_balance")
     is_staff = sc.has_permission(actor["role"], "view_customer_balances")
     if not (is_own_data or is_staff):
@@ -362,6 +394,11 @@ async def upload_bill(
     category: str = Form(...), file: UploadFile = File(...),
     actor: dict = Depends(require("submit_bill")),
 ):
+    try:
+        _validate_uuid_field(customer_id, "customer_id")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     content = await file.read()
     try:
         upload_result = sc.validate_file_upload(file.filename, content)
@@ -407,6 +444,11 @@ class PayBillRequest(BaseModel):
     customer_id: str
     requested_by: str
 
+    @field_validator("customer_id")
+    @classmethod
+    def validate_customer_id(cls, v):
+        return _validate_uuid_field(v, "customer_id")
+
 
 @app.post("/pilot/bills/{bill_id}/pay")
 async def pay_bill(bill_id: str, req: PayBillRequest, actor: dict = Depends(require("process_payment"))):
@@ -439,6 +481,11 @@ class HardshipRequest(BaseModel):
     vulnerability_indicators: list = Field(default_factory=list)
     requested_by: str
 
+    @field_validator("customer_id")
+    @classmethod
+    def validate_customer_id(cls, v):
+        return _validate_uuid_field(v, "customer_id")
+
 
 @app.post("/pilot/hardship/requests")
 async def request_hardship(req: HardshipRequest, actor: dict = Depends(require("request_hardship"))):
@@ -463,6 +510,11 @@ class ComplaintRequest(BaseModel):
     severity: str = "medium"
     vulnerability_indicators: list = Field(default_factory=list)
     received_by: str
+
+    @field_validator("customer_id")
+    @classmethod
+    def validate_customer_id(cls, v):
+        return _validate_uuid_field(v, "customer_id")
 
 
 @app.post("/pilot/complaints")
@@ -490,6 +542,11 @@ class AcceptDocumentRequest(BaseModel):
     customer_id: str
     version_id: str
     ip_address: Optional[str] = None
+
+    @field_validator("customer_id")
+    @classmethod
+    def validate_customer_id(cls, v):
+        return _validate_uuid_field(v, "customer_id")
 
 
 @app.post("/pilot/documents/{document_type}/accept")
