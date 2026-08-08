@@ -14,15 +14,92 @@ Deploying this is safe; it does not change that.
 
 ## Step 0 — a NEW Supabase project (do this first, once)
 
-The pilot migrations (012–023) have never been applied to the live
+The pilot migrations (012–024) have never been applied to the live
 `EasyBillsPay` project, and must not be. Create a fresh, free Supabase
 project dedicated to this pilot:
 
 1. supabase.com → New Project → free tier is enough for pilot volume.
-2. Open the SQL editor, run `backend/migrations/012_*.sql` through
-   `023_*.sql` **in numeric order**.
-3. Note the Project URL and the `service_role` key (Project Settings →
-   API) — these become `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` below.
+2. **Before the pilot migrations**, run this prerequisite — every pilot
+   migration attaches an audit trigger via `audit_trigger_func()`,
+   which lives in the *original* app's `schema.sql`, not in any pilot
+   migration. A brand-new project doesn't have it yet:
+   ```sql
+   CREATE TABLE IF NOT EXISTS audit_log (
+       id BIGSERIAL PRIMARY KEY,
+       table_name TEXT NOT NULL,
+       operation TEXT NOT NULL,
+       record_id TEXT,
+       user_id TEXT,
+       old_data JSONB,
+       new_data JSONB,
+       created_at TIMESTAMPTZ DEFAULT now()
+   );
+   CREATE INDEX IF NOT EXISTS idx_audit_log_table ON audit_log(table_name);
+   CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
+
+   CREATE OR REPLACE FUNCTION audit_trigger_func()
+   RETURNS TRIGGER AS $$
+   DECLARE
+       uid TEXT;
+   BEGIN
+       IF TG_TABLE_NAME = 'users' THEN
+           uid := CASE WHEN TG_OP = 'DELETE' THEN OLD.id ELSE NEW.id END;
+       ELSIF TG_OP = 'DELETE' THEN
+           uid := (to_jsonb(OLD) ->> 'user_id');
+       ELSE
+           uid := (to_jsonb(NEW) ->> 'user_id');
+       END IF;
+       IF TG_OP = 'INSERT' THEN
+           INSERT INTO audit_log (table_name, operation, record_id, user_id, new_data)
+           VALUES (TG_TABLE_NAME, 'INSERT', NEW.id, uid, to_jsonb(NEW));
+           RETURN NEW;
+       ELSIF TG_OP = 'UPDATE' THEN
+           INSERT INTO audit_log (table_name, operation, record_id, user_id, old_data, new_data)
+           VALUES (TG_TABLE_NAME, 'UPDATE', NEW.id, uid, to_jsonb(OLD), to_jsonb(NEW));
+           RETURN NEW;
+       ELSIF TG_OP = 'DELETE' THEN
+           INSERT INTO audit_log (table_name, operation, record_id, user_id, old_data)
+           VALUES (TG_TABLE_NAME, 'DELETE', OLD.id, uid, to_jsonb(OLD));
+           RETURN OLD;
+       END IF;
+       RETURN NULL;
+   END;
+   $$ LANGUAGE plpgsql SET search_path TO 'public', 'pg_temp';
+   ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+   ```
+3. Open the SQL editor, run `backend/migrations/012_*.sql` through
+   `024_*.sql` **in numeric order**.
+4. Note the Project URL and the `service_role` key (Project Settings →
+   API → **"Legacy anon, service_role API keys"** tab specifically —
+   the newer "Publishable and secret API keys" tab uses a different,
+   incompatible key format for this codebase). **Double-check you copy
+   the `service_role` key, not `anon`** — both authenticate
+   successfully and both let `/health` report the database as
+   reachable, so a mixed-up key is easy to miss: `anon` just silently
+   returns zero rows for everything due to Row Level Security, which
+   looks like "working" until you try to actually read or write real
+   data. If in doubt, decode the JWT payload (paste it into
+   jwt.io or any base64 decoder) and confirm it says `"role":
+   "service_role"`, not `"role":"anon"`.
+5. Also activate a pilot config version before testing onboarding —
+   none of the pilot endpoints can evaluate an application without one:
+   ```sql
+   INSERT INTO pilot_config_versions (
+       version, max_pilot_customers, contractual_credit_limit,
+       initial_available_credit_min, initial_available_credit_max,
+       max_single_bill_payment, max_outstanding_balance, aggregate_contractual_exposure_cap,
+       contract_term_months, interest_rate_percent, late_fee_amount, early_repayment_fee_amount,
+       cash_withdrawals_enabled, customer_transfers_enabled,
+       approved_bill_categories, geographic_areas, pilot_duration_months,
+       real_money_enabled, label, proposed_by, approved_by, is_active
+   ) VALUES (
+       1, 25, 2500.00, 300.00, 500.00, 500.00, 2500.00, 62500.00,
+       12, 0.00, 0.00, 0.00, false, false,
+       ARRAY['electricity','gas','water','telecommunications'], ARRAY['VIC'], 6,
+       false, 'subject to final Australian legal confirmation', 'ops_lead', 'compliance_lead', true
+   );
+   ```
+6. These become `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` in Step 5 below.
 
 ## Step 0.5 — issue your first API keys (do this once you have Step 0's Supabase project)
 
@@ -135,10 +212,15 @@ KEY="<the raw key issue_pilot_api_key.py printed for you>"
 curl $BASE/pilot/launch-gates/status
 
 # 2. Apply. Requires a key with the 'submit_application' permission
-#    (customer, case_worker, or admin role).
+#    (customer, case_worker, or admin role). user_id MUST be a real UUID
+#    -- every customer_id/user_id column in the pilot schema is
+#    UUID-typed; a plain string like "user-real-test-001" is rejected
+#    with a 422 (found live during initial deployment testing -- see
+#    session-17-live-deployment-real-bugs-found.md). Generate one with
+#    `python3 -c "import uuid; print(uuid.uuid4())"` or any UUID generator.
 curl -X POST $BASE/pilot/onboarding/apply \
   -H "Content-Type: application/json" -H "Authorization: Bearer $KEY" -d '{
-  "user_id": "user-real-test-001", "identity_verification_status": "verified",
+  "user_id": "REPLACE-WITH-A-REAL-UUID", "identity_verification_status": "verified",
   "age_confirmed": true, "residential_state": "VIC", "bank_account_verified": true,
   "income_amount": "5200", "income_frequency": "monthly", "employment_status": "full_time",
   "recurring_living_expenses": "2800", "existing_debts_and_bnpl": "0",
