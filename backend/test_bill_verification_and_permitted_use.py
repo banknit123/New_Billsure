@@ -167,6 +167,33 @@ async def main():
         check("rejects an invalid manual review decision value", True)
 
     # ---------------------------------------------------------------
+    # max_plausible_amount: found live during deployment testing --
+    # a real bill with a custom/embedded PDF font produced a garbled
+    # text layer, and the amount-extraction heuristic misread a
+    # barcode/reference digit sequence as a $10,000 bill amount, with
+    # extraction_confidence still reporting 1.0 (confidence reflects
+    # how many fields were found, not whether the values are sane).
+    # This would have been auto-verified without this check.
+    # ---------------------------------------------------------------
+    implausible = await bv.submit_and_verify_bill(
+        _submission(customer_id="cust-8", file_bytes=b"unique bytes 8", amount=Decimal("10000.00")),
+        BILLER_ALLOWLIST, APPROVED_CATEGORIES, max_plausible_amount=Decimal("500.00"))
+    check("an amount far exceeding max_plausible_amount goes to manual_review, not auto-verified on high confidence alone",
+          implausible["verification_status"] == "manual_review" and "AMOUNT_EXCEEDS_PLAUSIBLE_RANGE" in implausible["verification_reasons"])
+
+    within_range = await bv.submit_and_verify_bill(
+        _submission(customer_id="cust-9", file_bytes=b"unique bytes 9", amount=Decimal("150.00")),
+        BILLER_ALLOWLIST, APPROVED_CATEGORIES, max_plausible_amount=Decimal("500.00"))
+    check("an amount within max_plausible_amount is unaffected by the check and verifies normally",
+          within_range["verification_status"] == "verified")
+
+    no_bound_set = await bv.submit_and_verify_bill(
+        _submission(customer_id="cust-10", file_bytes=b"unique bytes 10", amount=Decimal("10000.00")),
+        BILLER_ALLOWLIST, APPROVED_CATEGORIES)  # max_plausible_amount not passed -- defaults to None, check disabled
+    check("with no max_plausible_amount passed at all, the check is simply skipped (backward compatible, no crash)",
+          no_bound_set["verification_status"] == "verified")
+
+    # ---------------------------------------------------------------
     # payment_permitted_use: prohibited payment types always blocked
     # ---------------------------------------------------------------
     base_req = dict(
