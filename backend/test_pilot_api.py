@@ -140,6 +140,18 @@ async def main():
     resp = client.get("/health")
     check("GET /health requires no auth and returns 200", resp.status_code == 200)
 
+    # ---------------------------------------------------------------
+    # Sandbox console: served at both / and /console, no auth needed to
+    # load the page itself (the API key is entered client-side and used
+    # only for the actual API calls the page makes).
+    # ---------------------------------------------------------------
+    resp = client.get("/")
+    check("GET / serves the sandbox console HTML with no auth required", resp.status_code == 200)
+    check("the console page mentions the sandbox/no-real-money warning", "Sandbox" in resp.text and "No Real Money" in resp.text)
+
+    resp = client.get("/console")
+    check("GET /console serves the same page", resp.status_code == 200 and "BillSure" in resp.text)
+
     original_find_many = fake_sdb.find_many
     async def broken_find_many(*a, **kw):
         raise RuntimeError("simulated database outage")
