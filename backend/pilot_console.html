@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BillSure Pilot — Sandbox Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #f6f5f1;
+    --paper-raised: #fdfcfa;
+    --ink: #1b1f23;
+    --line: #d8d3c8;
+    --stamp: #1f5c4a;
+    --stamp-tint: #e8efec;
+    --alert: #b0413e;
+    --alert-tint: #f7e9e8;
+    --muted: #6b6459;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+
+  .layout { display: flex; min-height: 100vh; }
+
+  /* ---------------- Sidebar ---------------- */
+  .sidebar {
+    width: 260px;
+    flex-shrink: 0;
+    background: var(--paper-raised);
+    border-right: 1px solid var(--line);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .brand .name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.02em;
+  }
+  .brand .sub {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .stamp {
+    position: relative;
+    border: 2px solid var(--alert);
+    color: var(--alert);
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 8px 10px;
+    text-align: center;
+    transform: rotate(-2deg);
+    border-radius: 2px;
+    background: var(--alert-tint);
+  }
+  .stamp small {
+    display: block;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    margin-top: 3px;
+    font-size: 10px;
+    opacity: 0.85;
+  }
+
+  .field-group { display: flex; flex-direction: column; gap: 6px; }
+  .field-group label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  input, textarea, select {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--ink);
+    width: 100%;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--stamp);
+    outline-offset: 1px;
+    border-color: var(--stamp);
+  }
+
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav button {
+    all: unset;
+    cursor: pointer;
+    padding: 9px 10px;
+    border-radius: 3px;
+    font-size: 13px;
+    color: var(--ink);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  nav button:hover { background: var(--stamp-tint); }
+  nav button.active { background: var(--stamp); color: #fff; font-weight: 500; }
+  nav button .tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    opacity: 0.7;
+  }
+
+  .gate-indicator {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.blocked { background: var(--alert); }
+  .dot.ok { background: var(--stamp); }
+
+  /* ---------------- Main ---------------- */
+  main { flex: 1; padding: 32px 40px; max-width: 900px; }
+  .panel {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 15px;
+    margin: 0 0 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel .desc { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+  .row.single { grid-template-columns: 1fr; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .checkbox-row input { width: auto; }
+  .checkbox-row label { font-size: 13px; text-transform: none; letter-spacing: normal; font-weight: 400; color: var(--ink); }
+
+  button.action {
+    all: unset;
+    cursor: pointer;
+    background: var(--stamp);
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 18px;
+    border-radius: 3px;
+    margin-top: 8px;
+  }
+  button.action:hover { background: #164a3b; }
+  button.action.danger { background: var(--alert); }
+  button.action.danger:hover { background: #8f3532; }
+  button.action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* ---------------- Response log ---------------- */
+  .log-panel {
+    background: #14181a;
+    border-radius: 4px;
+    padding: 18px 20px;
+    max-height: 420px;
+    overflow-y: auto;
+  }
+  .log-panel h2 { color: #e8e6df; }
+  .log-entry {
+    border-bottom: 1px solid #2a3033;
+    padding: 12px 0;
+  }
+  .log-entry:last-child { border-bottom: none; }
+  .log-entry .meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: #8a938f;
+    margin-bottom: 6px;
+    display: flex;
+    gap: 10px;
+  }
+  .log-entry .status-code { font-weight: 600; }
+  .log-entry .status-code.s2 { color: #6fd6a8; }
+  .log-entry .status-code.s4 { color: #e8b463; }
+  .log-entry .status-code.s5 { color: #e88a86; }
+  .log-entry pre {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: #d7ddd9;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .empty-log { color: #6b7370; font-size: 13px; font-style: italic; }
+
+  .section { display: none; }
+  .section.active { display: block; }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="name">BillSure Pilot</div>
+      <div class="sub">ASIC ERS Sandbox Console</div>
+    </div>
+
+    <div class="stamp">Sandbox — No Real Money
+      <small>Every gate below is closed until ASIC's conditions are met</small>
+    </div>
+
+    <div class="field-group">
+      <label for="apiKey">Authorization key</label>
+      <input type="password" id="apiKey" placeholder="bsp_...">
+      <div class="hint" id="keyHint">Stored only in this browser.</div>
+    </div>
+
+    <div class="gate-indicator" id="gateIndicator">
+      <span><span class="dot blocked" id="gateDot"></span>checking...</span>
+    </div>
+
+    <nav id="navList">
+      <button data-section="status" class="active">Status<span class="tag">GET</span></button>
+      <button data-section="onboarding">Onboarding<span class="tag">2 steps</span></button>
+      <button data-section="bills">Bills<span class="tag">upload / pay</span></button>
+      <button data-section="hardship">Hardship</button>
+      <button data-section="complaints">Complaints</button>
+      <button data-section="balance">Balance<span class="tag">GET</span></button>
+    </nav>
+  </aside>
+
+  <main>
+    <!-- STATUS -->
+    <section class="section active" id="section-status">
+      <div class="panel">
+        <h2>System status</h2>
+        <div class="desc">No authorization required — these two endpoints are public by design.</div>
+        <button class="action" onclick="checkHealth()">Check /health</button>
+        <button class="action" onclick="checkGates()">Check launch gates</button>
+      </div>
+    </section>
+
+    <!-- ONBOARDING -->
+    <section class="section" id="section-onboarding">
+      <div class="panel">
+        <h2>Apply</h2>
+        <div class="desc">Submits a new onboarding application. Deterministic eligibility — no opaque scoring.</div>
+        <div class="row">
+          <div class="field-group"><label>Customer UUID</label><input id="ob_user_id" class="mono" placeholder="auto-generated"></div>
+          <div class="field-group"><label>Residential state</label><input id="ob_state" value="VIC"></div>
+        </div>
+        <div class="row">
+          <div class="field-group"><label>Income (monthly, AUD)</label><input id="ob_income" value="5200"></div>
+          <div class="field-group"><label>Essential expenses (monthly)</label><input id="ob_expenses" value="2800"></div>
+        </div>
+        <div class="row">
+          <div class="field-group"><label>Requested purpose</label>
+            <select id="ob_purpose">
+              <option value="electricity">Electricity</option>
+              <option value="gas">Gas</option>
+              <option value="water">Water</option>
+              <option value="telecommunications">Telecommunications</option>
+            </select>
+          </div>
+          <div class="field-group"><label>Employment status</label><input id="ob_employment" value="full_time"></div>
+        </div>
+        <button class="action" onclick="submitApply()">Submit application</button>
+        <div class="hint" id="ob_result_hint"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Activate credit</h2>
+        <div class="desc">Maker-checker: preparer and approver must be distinct names. Requires the application ID from above.</div>
+        <div class="row">
+          <div class="field-group"><label>Application ID</label><input id="ac_app_id" class="mono"></div>
+          <div class="field-group"><label>Contractual limit</label><input id="ac_limit" value="2500.00"></div>
+        </div>
+        <div class="row">
+          <div class="field-group"><label>Prepared by</label><input id="ac_prepared" value="credit_assessor_1"></div>
+          <div class="field-group"><label>Approved by</label><input id="ac_approved" value="compliance_lead"></div>
+        </div>
+        <button class="action" onclick="activateCredit()">Activate credit account</button>
+      </div>
+    </section>
+
+    <!-- BILLS -->
+    <section class="section" id="section-bills">
+      <div class="panel">
+        <h2>Upload a bill</h2>
+        <div class="desc">Real OCR runs server-side. Category must match the bill; biller must be on the allowlist.</div>
+        <div class="row">
+          <div class="field-group"><label>Customer UUID</label><input id="bill_customer_id" class="mono"></div>
+          <div class="field-group"><label>Name on account</label><input id="bill_name" value="Test Customer"></div>
+        </div>
+        <div class="row">
+          <div class="field-group"><label>Category</label>
+            <select id="bill_category">
+              <option value="electricity">Electricity</option>
+              <option value="gas">Gas</option>
+              <option value="water">Water</option>
+              <option value="telecommunications">Telecommunications</option>
+            </select>
+          </div>
+          <div class="field-group"><label>Bill file (PDF/JPG/PNG)</label><input type="file" id="bill_file"></div>
+        </div>
+        <button class="action" onclick="uploadBill()">Upload &amp; verify</button>
+        <div class="hint">Max 15MB. Only recognised billers verify automatically — see biller_allowlist.py.</div>
+      </div>
+
+      <div class="panel">
+        <h2>Pay a bill</h2>
+        <div class="desc">Checks the regulatory launch gate before anything else. Expected to be blocked (403) until every gate is approved.</div>
+        <div class="row">
+          <div class="field-group"><label>Bill ID</label><input id="pay_bill_id" class="mono"></div>
+          <div class="field-group"><label>Customer UUID</label><input id="pay_customer_id" class="mono"></div>
+        </div>
+        <button class="action danger" onclick="payBill()">Attempt payment</button>
+      </div>
+    </section>
+
+    <!-- HARDSHIP -->
+    <section class="section" id="section-hardship">
+      <div class="panel">
+        <h2>Request hardship support</h2>
+        <div class="desc">No payment-status gate — always reachable, regardless of a customer's account standing.</div>
+        <div class="row">
+          <div class="field-group"><label>Customer UUID</label><input id="hs_customer_id" class="mono"></div>
+          <div class="field-group"><label>Requested by</label><input id="hs_requested_by" value="customer"></div>
+        </div>
+        <div class="row single">
+          <div class="field-group"><label>Reason</label><textarea id="hs_reason" rows="2">Reduced hours at work</textarea></div>
+        </div>
+        <button class="action" onclick="requestHardship()">Submit hardship request</button>
+      </div>
+    </section>
+
+    <!-- COMPLAINTS -->
+    <section class="section" id="section-complaints">
+      <div class="panel">
+        <h2>Submit a complaint</h2>
+        <div class="desc">Deadlines are computed from ASIC RG 271 on intake — 30 days standard, 21 for credit default-notice complaints.</div>
+        <div class="row">
+          <div class="field-group"><label>Customer UUID</label><input id="cp_customer_id" class="mono"></div>
+          <div class="field-group"><label>Channel</label>
+            <select id="cp_channel">
+              <option value="web_form">Web form</option>
+              <option value="phone">Phone</option>
+              <option value="email">Email</option>
+              <option value="in_person">In person</option>
+              <option value="mail">Mail</option>
+            </select>
+          </div>
+        </div>
+        <div class="row single">
+          <div class="field-group"><label>Description</label><textarea id="cp_description" rows="2">Test complaint from the sandbox console</textarea></div>
+        </div>
+        <button class="action" onclick="submitComplaint()">Submit complaint</button>
+      </div>
+    </section>
+
+    <!-- BALANCE -->
+    <section class="section" id="section-balance">
+      <div class="panel">
+        <h2>Check balance</h2>
+        <div class="desc">A customer can view their own balance; staff/admin keys can view any customer's.</div>
+        <div class="row single">
+          <div class="field-group"><label>Customer UUID</label><input id="bal_customer_id" class="mono"></div>
+        </div>
+        <button class="action" onclick="checkBalance()">Get balance</button>
+      </div>
+    </section>
+
+    <div class="panel log-panel">
+      <h2>Response log</h2>
+      <div id="logList"><div class="empty-log">No requests yet — try "Check /health" to start.</div></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const BASE = window.location.origin;
+
+// --- API key persistence (this browser only) ---
+const keyInput = document.getElementById('apiKey');
+keyInput.value = localStorage.getItem('billsure_pilot_key') || '';
+keyInput.addEventListener('input', () => localStorage.setItem('billsure_pilot_key', keyInput.value));
+
+function authHeader() {
+  const key = keyInput.value.trim();
+  return key ? { 'Authorization': 'Bearer ' + key } : {};
+}
+
+// --- Nav ---
+document.querySelectorAll('#navList button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#navList button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('section-' + btn.dataset.section).classList.add('active');
+  });
+});
+
+// --- Logging ---
+function log(label, method, path, status, body) {
+  const list = document.getElementById('logList');
+  if (list.querySelector('.empty-log')) list.innerHTML = '';
+  const entry = document.createElement('div');
+  entry.className = 'log-entry';
+  const statusClass = status >= 500 ? 's5' : status >= 400 ? 's4' : 's2';
+  entry.innerHTML = `<div class="meta"><span>${new Date().toLocaleTimeString()}</span><span>${method} ${path}</span><span class="status-code ${statusClass}">${status}</span><span>${label}</span></div><pre>${escapeHtml(JSON.stringify(body, null, 2))}</pre>`;
+  list.insertBefore(entry, list.firstChild);
+}
+function escapeHtml(s) { return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+async function call(label, method, path, { json, form, auth = true } = {}) {
+  const headers = auth ? authHeader() : {};
+  const opts = { method, headers };
+  if (json) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(json); }
+  if (form) { opts.body = form; }
+  try {
+    const resp = await fetch(BASE + path, opts);
+    let body;
+    try { body = await resp.json(); } catch { body = await resp.text(); }
+    log(label, method, path, resp.status, body);
+    return { status: resp.status, body };
+  } catch (e) {
+    log(label, method, path, 0, { error: String(e) });
+    return { status: 0, body: { error: String(e) } };
+  }
+}
+
+function uuid() {
+  return ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+}
+
+// --- Status ---
+async function checkHealth() {
+  const { status, body } = await call('Health check', 'GET', '/health', { auth: false });
+  updateGateDot(null);
+}
+async function checkGates() {
+  const { body } = await call('Launch gate status', 'GET', '/pilot/launch-gates/status', { auth: false });
+  updateGateDot(body.production_authorized);
+}
+function updateGateDot(authorized) {
+  const dot = document.getElementById('gateDot');
+  const indicator = document.getElementById('gateIndicator');
+  if (authorized === true) {
+    dot.className = 'dot ok';
+    indicator.querySelector('span').innerHTML = '<span class="dot ok"></span>production authorized';
+  } else if (authorized === false) {
+    dot.className = 'dot blocked';
+    indicator.querySelector('span').innerHTML = '<span class="dot blocked"></span>gates closed (expected)';
+  }
+}
+// auto-check on load
+checkGates();
+
+// --- Onboarding ---
+async function submitApply() {
+  const userId = document.getElementById('ob_user_id').value.trim() || uuid();
+  document.getElementById('ob_user_id').value = userId;
+  const payload = {
+    user_id: userId, identity_verification_status: 'verified', age_confirmed: true,
+    residential_state: document.getElementById('ob_state').value, bank_account_verified: true,
+    income_amount: document.getElementById('ob_income').value, income_frequency: 'monthly',
+    employment_status: document.getElementById('ob_employment').value,
+    recurring_living_expenses: document.getElementById('ob_expenses').value,
+    existing_debts_and_bnpl: '0', requested_credit_purpose: document.getElementById('ob_purpose').value,
+    requirements_and_objectives: 'Submitted via sandbox console', utility_bill_ownership_verified: true,
+    vulnerability_indicators: [], bankruptcy_status: 'none',
+    consent_types_accepted: ['privacy', 'identity_check', 'affordability_check', 'fraud_check'],
+  };
+  const { status, body } = await call('Apply', 'POST', '/pilot/onboarding/apply', { json: payload });
+  if (status === 200) {
+    document.getElementById('ac_app_id').value = body.id;
+    document.getElementById('bill_customer_id').value = userId;
+    document.getElementById('pay_customer_id').value = userId;
+    document.getElementById('hs_customer_id').value = userId;
+    document.getElementById('cp_customer_id').value = userId;
+    document.getElementById('bal_customer_id').value = userId;
+    document.getElementById('ob_result_hint').textContent = 'Outcome: ' + body.eligibility_outcome + ' — application ID copied to the credit-activation step.';
+  }
+}
+async function activateCredit() {
+  const payload = {
+    prepared_by: document.getElementById('ac_prepared').value,
+    approved_by: document.getElementById('ac_approved').value,
+    contractual_limit: document.getElementById('ac_limit').value,
+    active_customer_count: 0, current_aggregate_contractual_exposure: '0',
+  };
+  await call('Activate credit', 'POST', `/pilot/onboarding/${document.getElementById('ac_app_id').value}/activate-credit`, { json: payload });
+}
+
+// --- Bills ---
+async function uploadBill() {
+  const fileInput = document.getElementById('bill_file');
+  if (!fileInput.files.length) { alert('Choose a bill file first.'); return; }
+  const form = new FormData();
+  form.append('customer_id', document.getElementById('bill_customer_id').value);
+  form.append('customer_name_on_account', document.getElementById('bill_name').value);
+  form.append('category', document.getElementById('bill_category').value);
+  form.append('file', fileInput.files[0]);
+  const { status, body } = await call('Upload bill', 'POST', '/pilot/bills/upload', { form });
+  if (status === 200 && body.bill && body.bill.id) {
+    document.getElementById('pay_bill_id').value = body.bill.id;
+  }
+}
+async function payBill() {
+  const payload = { customer_id: document.getElementById('pay_customer_id').value, requested_by: 'payments_admin' };
+  await call('Pay bill', 'POST', `/pilot/bills/${document.getElementById('pay_bill_id').value}/pay`, { json: payload });
+}
+
+// --- Hardship ---
+async function requestHardship() {
+  const payload = {
+    customer_id: document.getElementById('hs_customer_id').value,
+    reason: document.getElementById('hs_reason').value,
+    vulnerability_indicators: [], requested_by: document.getElementById('hs_requested_by').value,
+  };
+  await call('Hardship request', 'POST', '/pilot/hardship/requests', { json: payload });
+}
+
+// --- Complaints ---
+async function submitComplaint() {
+  const payload = {
+    customer_id: document.getElementById('cp_customer_id').value,
+    channel: document.getElementById('cp_channel').value,
+    description: document.getElementById('cp_description').value,
+    category: 'standard', severity: 'medium', received_by: 'console_operator',
+  };
+  await call('Complaint', 'POST', '/pilot/complaints', { json: payload });
+}
+
+// --- Balance ---
+async function checkBalance() {
+  await call('Balance check', 'GET', `/pilot/credit/accounts/${document.getElementById('bal_customer_id').value}/balance`, {});
+}
+</script>
+</body>
+</html>
