@@ -419,7 +419,10 @@ async def upload_bill(
         fraud_indicators=[],
     )
     try:
-        bill_row = await bv.submit_and_verify_bill(submission, known_billers, pc.APPROVED_BILL_CATEGORIES)
+        active_config = await pc.get_active_config()
+        max_plausible = active_config.max_single_bill_payment if active_config else None
+        bill_row = await bv.submit_and_verify_bill(submission, known_billers, pc.APPROVED_BILL_CATEGORIES,
+                                                     max_plausible_amount=max_plausible)
     except Exception as e:
         _raise_as_http(e)
     return {"bill": bill_row, "ocr": {"method": extraction.extraction_method, "confidence": extraction.extraction_confidence,
