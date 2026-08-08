@@ -152,10 +152,10 @@ async def main():
     check("new credit account starts with zero outstanding principal", outstanding_before == Decimal("0.00"))
 
     try:
-        await cl.draw_credit("cust-1", Decimal("600.00"), "bill-1", "admin1")
-        check("rejects a draw above the pilot's max single-bill payment ($500)", False)
+        await cl.draw_credit("cust-1", Decimal("1600.00"), "bill-1", "admin1")
+        check("rejects a draw above the pilot's max single-bill payment ($1,500)", False)
     except cl.CreditLedgerError:
-        check("rejects a draw above the pilot's max single-bill payment ($500)", True)
+        check("rejects a draw above the pilot's max single-bill payment ($1,500)", True)
 
     j1 = await cl.draw_credit("cust-1", Decimal("400.00"), "bill-1", "admin1")
     check("valid draw within limits posts a journal", j1 is not None)
@@ -168,10 +168,9 @@ async def main():
     except cl.CreditLedgerError:
         check("rejects a draw that would exceed the customer's available credit", True)
     # (2500 limit - 400 outstanding = 2100 available; 2200 exceeds it,
-    # even though 2200 alone is under the $500 single-bill cap x however
-    # many bills -- this specific draw is a single bill under $500? no,
-    # 2200 > 500 so it would ALSO fail the single-bill check first; the
-    # point of this case is still valid as a hard block either way.)
+    # even though 2200 alone is under neither the $1,500 single-bill cap
+    # -- 2200 > 1500 so it would ALSO fail the single-bill check first;
+    # the point of this case is still valid as a hard block either way.)
 
     try:
         await cl.draw_credit("nonexistent-customer", Decimal("100.00"), "bill-3", "admin1")
