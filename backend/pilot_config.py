@@ -59,7 +59,7 @@ HARD_MAX_PILOT_CUSTOMERS = 25
 HARD_MAX_CONTRACTUAL_CREDIT_LIMIT = Decimal("2500.00")
 HARD_MAX_INITIAL_AVAILABLE_CREDIT = Decimal("500.00")
 HARD_MIN_INITIAL_AVAILABLE_CREDIT = Decimal("300.00")
-HARD_MAX_SINGLE_BILL_PAYMENT = Decimal("500.00")
+HARD_MAX_SINGLE_BILL_PAYMENT = Decimal("1500.00")
 HARD_MAX_OUTSTANDING_BALANCE = Decimal("2500.00")
 HARD_MAX_AGGREGATE_EXPOSURE = Decimal("62500.00")
 HARD_CONTRACT_TERM_MONTHS = 12
@@ -133,7 +133,7 @@ def validate_config_change(
     if new_config.initial_available_credit_min > new_config.initial_available_credit_max:
         errors.append("initial_available_credit_min cannot exceed initial_available_credit_max")
     if new_config.max_single_bill_payment > HARD_MAX_SINGLE_BILL_PAYMENT:
-        errors.append("max_single_bill_payment exceeds hard cap AUD 500")
+        errors.append("max_single_bill_payment exceeds hard cap AUD 1,500")
     if new_config.max_outstanding_balance > HARD_MAX_OUTSTANDING_BALANCE:
         errors.append("max_outstanding_balance exceeds hard cap AUD 2,500")
     if new_config.aggregate_contractual_exposure_cap > HARD_MAX_AGGREGATE_EXPOSURE:
