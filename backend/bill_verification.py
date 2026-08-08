@@ -100,11 +100,25 @@ def verify_bill(
     already_paid_hashes: set,
     already_paid_reference_tuples: set,
     min_confidence: float = DEFAULT_MIN_EXTRACTION_CONFIDENCE,
+    max_plausible_amount: Optional[Decimal] = None,
     now: Optional[datetime] = None,
 ) -> VerificationResult:
     """Deterministic bill verification. All comparison sets are passed in
     by the caller (never fetched inside this function) so a decision is
-    always reproducible from its recorded inputs."""
+    always reproducible from its recorded inputs.
+
+    `max_plausible_amount` (optional) catches a real failure mode found
+    during live deployment testing: OCR/text-layer extraction can
+    misread a barcode or reference-number digit sequence as the bill
+    amount, especially on PDFs with custom/embedded fonts, producing an
+    implausibly large figure with a high reported confidence (the
+    confidence score reflects how many fields were found, not whether
+    the values are sane). A caller should pass the pilot's own
+    max_single_bill_payment here — since no bill above that could ever
+    actually be paid, a submitted amount far exceeding it is either
+    genuinely out of scope for this pilot or an extraction error, and
+    either way deserves a human look rather than being silently
+    auto-verified on high 'confidence' alone."""
     now = now or datetime.now(timezone.utc)
     bill_hash = compute_bill_hash(submission.file_bytes)
     ref_tuple = (submission.biller_name_extracted, submission.biller_reference, str(submission.amount), submission.due_date)
@@ -144,6 +158,8 @@ def verify_bill(
         review_reasons.append("NAME_MISMATCH")
     if submission.fraud_indicators:
         review_reasons.append("ALTERATION_OR_FRAUD_INDICATOR")
+    if max_plausible_amount is not None and submission.amount > max_plausible_amount:
+        review_reasons.append("AMOUNT_EXCEEDS_PLAUSIBLE_RANGE")
 
     if review_reasons:
         return VerificationResult(status="manual_review", reasons=review_reasons, bill_hash=bill_hash, evidence=evidence, checked_at=now.isoformat())
@@ -152,7 +168,8 @@ def verify_bill(
 
 
 async def submit_and_verify_bill(submission: BillSubmission, biller_allowlist: set, approved_categories: set,
-                                  min_confidence: float = DEFAULT_MIN_EXTRACTION_CONFIDENCE) -> dict:
+                                  min_confidence: float = DEFAULT_MIN_EXTRACTION_CONFIDENCE,
+                                  max_plausible_amount: Optional[Decimal] = None) -> dict:
     existing_verified = await sdb.find_many("pilot_bill_submissions", {"customer_id": submission.customer_id})
     existing_hashes = {b["bill_hash"] for b in existing_verified}
     existing_ref_tuples = {
@@ -165,7 +182,7 @@ async def submit_and_verify_bill(submission: BillSubmission, biller_allowlist: s
     result = verify_bill(
         submission, biller_allowlist, approved_categories,
         existing_hashes, existing_ref_tuples, paid_hashes, paid_ref_tuples,
-        min_confidence=min_confidence,
+        min_confidence=min_confidence, max_plausible_amount=max_plausible_amount,
     )
 
     row = {
