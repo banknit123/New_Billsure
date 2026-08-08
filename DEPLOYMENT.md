@@ -46,6 +46,27 @@ docker-compose -f docker-compose.yml up -d --build
 | STRIPE_API_KEY    | sk_test_...            | sk_test_...                        | sk_live_...                       |
 | REACT_APP_BACKEND_URL | http://localhost:3000 | https://v2.easybillspay.com.au  | https://www.easybillspay.com.au   |
 
+### ASIC ERS pilot console (optional, separate from the table above)
+
+`REACT_APP_PILOT_API_URL` -- only used by `src/pages/AsicPilotConsole.jsx`
+(the `/asic-pilot` route). Defaults to `https://pilot-api.billsure.com.au`
+in code if unset, so it's genuinely optional to configure. Deliberately
+NOT added to the main environment table above: this points at the
+**separate** ASIC ERS pilot sandbox API and database
+(`backend/pilot_api.py`, a different service from the one
+`REACT_APP_BACKEND_URL` points at), and setting it has no effect on
+anything else this app does. See `docs/asic-ers-readiness/` for the
+full context on what this route is and is not authorised to do.
+
+**Before deploying this frontend to a real customer-facing domain**,
+decide deliberately whether `/asic-pilot` should be reachable there.
+It is currently a normal route like any other in this app -- there is
+no build-time flag excluding it from a production build. If you don't
+want pilot testing pages reachable on the live product's domain,
+either remove the route before that specific deploy, or gate it behind
+something (a feature flag, a build variant) before shipping this app
+to `www.easybillspay.com.au` or wherever it's actually served live.
+
 ## Safe Upgrade Checklist
 - [ ] All tests pass on v2 branch
 - [ ] Database migration scripts tested on staging
