@@ -44,8 +44,36 @@ logger = logging.getLogger(__name__)
 # rather than present a low-quality guess as if it were reliable.
 MIN_USABLE_CONFIDENCE = 0.30
 
-_AMOUNT_PATTERN = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)")
-_DATE_PATTERNS = [
+_AMOUNT_CONTEXT_PATTERN = re.compile(
+    r"(?:total\s+amount\s+due|amount\s+due|total\s+current\s+charges(?:\s*\([^)]*\))?|total\s+payable)"
+    r"\s*[:\-]?\s*\$?\s*(\d{1,3}(?:,\d{3})*\.\d{2})",
+    re.IGNORECASE,
+)
+# Fallback only -- the largest dollar figure anywhere in the document.
+# Kept deliberately as a last resort, not the primary strategy: real
+# bills routinely mention larger, unrelated dollar figures (a card-
+# payment limit disclaimer, a "you could save up to $X/year" upsell) --
+# found live when a real EnergyAustralia bill's "$10,000" card-payment
+# limit disclaimer was picked up as the amount due, instead of the
+# actual $303.38 total, because it was the biggest dollar-shaped match
+# in the text. Context anchoring above is the real fix; this pattern
+# only fires when no anchored match exists at all.
+_AMOUNT_FALLBACK_PATTERN = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)")
+
+_DUE_DATE_CONTEXT_PATTERN = re.compile(
+    r"(?:bill\s+due\s+date|payment\s+due\s+date|due\s+date)\s*[:\-]?\s*"
+    r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})",
+    re.IGNORECASE,
+)
+# Fallback date patterns, tried in order, only when no due-date-labelled
+# match exists. Includes a month-name format ("25 Feb 2025") that the
+# original numeric-only patterns never matched at all -- found live on
+# the same real bill, whose actual due date is written that way; the
+# original code fell back to the first numeric-looking date ANYWHERE in
+# the document, which turned out to be an unrelated billing-period start
+# date from a tariff table on a different page.
+_DATE_FALLBACK_PATTERNS = [
+    re.compile(r"\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-zA-Z]*\s+\d{4})\b", re.IGNORECASE),
     re.compile(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b"),
     re.compile(r"\b(\d{4}-\d{2}-\d{2})\b"),
 ]
@@ -76,25 +104,38 @@ class ExtractionResult:
 
 def _parse_fields_from_text(text: str, known_billers: Optional[set] = None) -> dict:
     amount = None
-    amount_matches = _AMOUNT_PATTERN.findall(text)
-    if amount_matches:
-        # Bills often show multiple dollar figures (previous balance,
-        # this bill, GST) — take the largest as a conservative guess for
-        # "total amount due"; this is a heuristic, not authoritative, and
-        # low extraction_confidence should route ambiguous cases to
-        # manual review regardless of which figure was picked here.
+    context_match = _AMOUNT_CONTEXT_PATTERN.search(text)
+    if context_match:
         try:
-            amounts = [Decimal(m.replace(",", "")) for m in amount_matches]
-            amount = max(amounts)
+            amount = Decimal(context_match.group(1).replace(",", ""))
         except InvalidOperation:
             amount = None
+    if amount is None:
+        # No "Amount due"-style label found at all -- fall back to the
+        # old blind heuristic rather than giving up entirely. Still a
+        # real risk of picking up an unrelated figure (see the pattern's
+        # own docstring above); a caller should treat an amount sourced
+        # this way as lower-confidence than a context-anchored one, but
+        # this module doesn't currently distinguish the two in its
+        # confidence score -- a known, documented limitation.
+        amount_matches = _AMOUNT_FALLBACK_PATTERN.findall(text)
+        if amount_matches:
+            try:
+                amounts = [Decimal(m.replace(",", "")) for m in amount_matches]
+                amount = max(amounts)
+            except InvalidOperation:
+                amount = None
 
     due_date = None
-    for pattern in _DATE_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            due_date = m.group(1)
-            break
+    context_date_match = _DUE_DATE_CONTEXT_PATTERN.search(text)
+    if context_date_match:
+        due_date = context_date_match.group(1)
+    else:
+        for pattern in _DATE_FALLBACK_PATTERNS:
+            m = pattern.search(text)
+            if m:
+                due_date = m.group(1)
+                break
 
     reference = None
     m = _REFERENCE_PATTERN.search(text)
